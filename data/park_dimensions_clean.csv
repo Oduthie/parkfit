@@ -1,0 +1,31 @@
+park_name,team,city,elevation_ft,lf_line,slf,lfa,lcf,lcc,cf,rcc,rcf,rfa,srf,rf_line,lf_wall,lcf_wall,cf_wall,rcf_wall,rf_wall,roof_type
+Angel Stadium,Angels,Anaheim,160,330,371.0,381.0,390.0,,400,,375.0,365.0,362.0,330,5,8.0,8,8.0,5.0,open
+Globe Life Field,Rangers,Arlington,616,329,,372.0,,410.0,407,410.0,,374.0,,326,8,8.0,8,8.0,8.0,retractable
+Truist Park,Braves,Atlanta,1050,335,,385.0,,,400,,,375.0,,325,6,8.0,8,8.0,16.0,open
+Camden Yards,Orioles,Baltimore,33,333,,,363.0,373.0,400,386.0,373.0,,,318,8,7.0,7,7.0,21.0,open
+Fenway Park,Red Sox,Boston,20,310,,335.0,379.0,388.0,390,420.0,383.0,380.0,,302,37,18.0,9,11.0,3.0,open
+Wrigley Field,Cubs,Chicago,595,355,357.0,,363.0,,400,407.0,381.0,,363.0,353,16,11.0,11,11.0,16.0,open
+Guaranteed Rate Field,White Sox,Chicago,595,330,352.0,,372.0,,400,,372.0,,352.0,335,8,8.0,8,8.0,8.0,open
+Great American Ball Park,Reds,Cincinnati,490,328,,366.0,379.0,,404,,370.0,366.0,,325,12,12.0,8,8.0,8.0,open
+Progressive Field,Guardians,Cleveland,653,325,,360.0,370.0,410.0,405,,375.0,,,325,19,19.0,19,19.0,14.0,open
+Coors Field,Rockies,Denver,5280,347,,,390.0,420.0,415,424.0,375.0,,358.0,350,13,8.0,8,16.5,16.5,open
+Comerica Park,Tigers,Detroit,585,345,,370.0,398.0,,420,,403.0,356.0,,330,6,8.5,8,14.0,8.0,open
+Daikin Park,Astros,Houston,43,315,335.0,362.0,390.0,404.0,409,409.0,397.0,373.0,,326,21,25.0,9,9.0,7.0,retractable
+Kauffman Stadium,Royals,Kansas City,909,330,362.0,385.0,,,410,,,385.0,362.0,330,8,8.0,8,8.0,8.0,open
+Dodger Stadium,Dodgers,Los Angeles,512,330,360.0,375.0,385.0,,400,,385.0,375.0,360.0,330,4,8.0,8,8.0,4.0,open
+loanDepot Park,Marlins,Miami,6,344,358.0,380.0,393.0,,407,,391.0,386.0,355.0,335,7,14.0,20,11.0,7.0,retractable
+American Family Field,Brewers,Milwaukee,635,344,363.0,371.0,382.0,,400,,383.0,371.0,355.0,345,8,8.0,8,8.0,6.0,retractable
+Target Field,Twins,Minneapolis,830,339,,377.0,384.0,411.0,404,403.0,378.0,367.0,,328,8,8.0,8,23.0,23.0,open
+Citi Field,Mets,New York,33,331,347.0,358.0,373.0,385.0,408,408.0,390.0,384.0,375.0,330,8,8.0,11,18.0,8.0,open
+Yankee Stadium,Yankees,New York,33,318,375.0,382.0,399.0,,408,,385.0,360.0,353.0,314,8,8.0,8,8.0,8.0,open
+Sutter Health Park,Athletics,Sacramento,26,330,,,380.0,,403,,380.0,,,325,8,8.0,8,5.0,5.0,open
+Citizens Bank Park,Phillies,Philadelphia,39,329,,361.0,385.0,409.0,401,398.0,381.0,357.0,,330,11,11.0,6,13.0,13.0,open
+Chase Field,Diamondbacks,Phoenix,1082,328,,376.0,,412.0,407,414.0,,376.0,,335,8,8.0,25,8.0,8.0,retractable
+PNC Park,Pirates,Pittsburgh,730,325,362.0,389.0,395.0,410.0,399,,395.0,,350.0,320,6,10.0,10,21.0,21.0,open
+Petco Park,Padres,San Diego,62,336,357.0,377.0,390.0,,396,,396.0,380.0,363.0,322,4,7.5,7,10.0,10.0,open
+Oracle Park,Giants,San Francisco,0,339,,364.0,378.0,404.0,399,421.0,384.0,365.0,,309,8,11.0,8,25.0,25.0,open
+T-Mobile Park,Mariners,Seattle,175,331,353.0,368.0,378.0,,401,,381.0,357.0,340.0,326,8,8.0,8,8.0,8.0,retractable
+Busch Stadium,Cardinals,St Louis,466,336,362.0,381.0,396.0,,400,,396.0,381.0,362.0,335,8,8.0,8,8.0,8.0,open
+Tropicana Field,Rays,St Petersburg,15,315,,370.0,,410.0,404,404.0,,360.0,,322,11,11.0,9,11.0,11.0,dome
+Rogers Centre,Blue Jays,Toronto,300,328,,381.0,390.0,,400,,372.0,359.0,,328,14,11.0,8,14.0,12.0,retractable
+Nationals Park,Nationals,Washington,25,336,,,377.0,,402,,370.0,,,335,8,8.0,12,12.0,12.0,open
