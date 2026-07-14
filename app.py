@@ -811,8 +811,11 @@ with tab4:
 
         def park_blurb(park, with_numbers=True):
             sub = d2[(d2["park"] == park)
-                     & (~d2["la_bucket"].isin(["GB", "Popup"]))
-                     & (d2["l2_n"] >= 80)]
+                     & (~d2["la_bucket"].isin(["GB", "Popup"]))]
+            for _n in (80, 40, 15):
+                if (sub["l2_n"] >= _n).sum() >= 4:
+                    sub = sub[sub["l2_n"] >= _n]
+                    break
             tops = sub.nlargest(2, "delta_l2")
             bots = sub.nsmallest(2, "delta_l2")
             if with_numbers:
