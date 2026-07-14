@@ -238,6 +238,9 @@ players = (
     .merge(profiles.drop(columns=["stand_bucket"], errors="ignore"),
            on=["batter", "batter_name"], how="left")
 )
+# Switch-hitters produce two profile rows (one per side); keep one per batter
+# so every downstream table shows each player exactly once.
+players = players.drop_duplicates(subset=["batter"]).reset_index(drop=True)
 if not extras.empty:
     players = players.merge(extras, on="batter", how="left")
 else:
@@ -256,14 +259,13 @@ for _, p in players.dropna(subset=["home_park"]).iterrows():
     realistic = s[(s["park"] != "Coors Field") & (s["park"] != p["home_park"])]
     if realistic.empty:
         continue
-    best_alt = realistic.loc[realistic["projected_contact_woba"].idxmax()]
+    best_alt = realistic.loc[realistic["fit_vs_avg"].idxmax()]
     home_rows.append({
         "batter": p["batter"],
         "home_rank": int(home["park_rank"].iloc[0]),
         "home_woba": float(home["projected_contact_woba"].iloc[0]),
         "alt_park": best_alt["park"],
-        "upgrade": float(best_alt["projected_contact_woba"]
-                         - home["projected_contact_woba"].iloc[0]),
+        "upgrade": float(best_alt["fit_vs_avg"] - home["fit_vs_avg"].iloc[0]),
     })
 home_df = pd.DataFrame(home_rows)
 if not home_df.empty:
@@ -424,9 +426,9 @@ with tab1:
         if has_home:
             badges += (f'<span class="badge b-purple">Home: {html.escape(info["home_park"])} '
                        f'(#{int(info["home_rank"])} for him)</span>')
-            if info["upgrade"] >= 0.010:
-                badges += (f'<span class="badge b-red">Held back: +{info["upgrade"]:.3f} at '
-                           f'{html.escape(str(info["alt_park"]))}</span>')
+            if info["upgrade"] >= 0.006:
+                badges += (f'<span class="badge b-red">Held back: +{info["upgrade"]:.3f} '
+                           f'shape fit at {html.escape(str(info["alt_park"]))}</span>')
             elif int(info["home_rank"]) <= 3:
                 badges += '<span class="badge b-green">Well placed</span>'
         if info["tier"] == "provisional":
@@ -452,11 +454,11 @@ with tab1:
 
         home_line = ""
         if has_home:
-            if info["upgrade"] >= 0.010:
+            if info["upgrade"] >= 0.006:
                 home_line = (f' His current home, <b>{html.escape(info["home_park"])}</b>, ranks '
-                             f'<b>#{int(info["home_rank"])}</b> for his profile — a real cost: '
-                             f'<b>{html.escape(str(info["alt_park"]))}</b> adds '
-                             f'<b>{info["upgrade"]:+.3f}</b> wOBA (Coors excluded).')
+                             f'<b>#{int(info["home_rank"])}</b> for his profile — the park his '
+                             f'shape gains most at is <b>{html.escape(str(info["alt_park"]))}</b> '
+                             f'(<b>{info["upgrade"]:+.3f}</b> shape fit, Coors excluded).')
             else:
                 home_line = (f' His current home, <b>{html.escape(info["home_park"])}</b>, ranks '
                              f'<b>#{int(info["home_rank"])}</b> — close to optimal.')
@@ -586,6 +588,15 @@ with tab2:
 
 # ================= TAB 3 =================
 with tab3:
+    st.markdown(
+        '<div class="insight"><b>Quick glossary.</b> <b>Raw Fit Δ</b> — how much a park boosts '
+        'or hurts this hitter\'s contact overall; hitter-friendly parks score high for everyone. '
+        '<b>Shape Edge</b> — how much MORE this hitter gains at a park than the average '
+        'same-handed hitter would; this is the park matching HIS specific swing, and it\'s the '
+        'number these boards run on. <b>Spread</b> — the gap between his best and worst park; '
+        'high-spread hitters are the ones where the address genuinely changes the player.</div>',
+        unsafe_allow_html=True)
+
     # ---- 2026-27 Free Agency board -----------------------------------
     fa_names = []
     for cand in FA_FILE_CANDIDATES:
@@ -647,8 +658,9 @@ with tab3:
         'small numbers, real signal.</div>', unsafe_allow_html=True)
     lens_park = st.selectbox("Park", sorted(CURRENT_PARKS_2026), key="lens_park")
     lp = (scores[scores["park"] == lens_park]
-          .merge(players[["batter", "archetype", "tier"]], on="batter", how="left"))
-    lp = lp[lp["tier"] == "full"]
+          .merge(players[["batter", "archetype", "tier"]].drop_duplicates("batter"),
+                 on="batter", how="left"))
+    lp = lp[lp["tier"] == "full"].drop_duplicates(subset=["batter"])
     lens_cols = ["batter_name", "stand_bucket", "archetype", "fit_vs_avg",
                  "park_fit_delta", "park_rank"]
     lens_rename = {"batter_name": "Hitter", "stand_bucket": "Bats",
@@ -699,26 +711,6 @@ with tab3:
     if n_excl:
         st.caption(f"{n_excl} hitters excluded from the board (no home park detected — "
                    f"typically too few recent home batted balls).")
-
-    st.markdown("### Park-proof vs park-dependent power")
-    power = players[players["hr_pct"].fillna(0) >= 4.5]
-    l, r = st.columns(2)
-    with l:
-        st.markdown("**Park-PROOF power** — production travels anywhere")
-        t = power.nsmallest(12, "spread")[["batter_name", "hr_pct", "k_pct", "spread"]]
-        st.dataframe(t.rename(columns={"batter_name": "Hitter", "hr_pct": "HR%",
-            "k_pct": "K%", "spread": "Spread"}), hide_index=True, use_container_width=True,
-            column_config={"Spread": st.column_config.NumberColumn(format="%.3f"),
-                           "HR%": st.column_config.NumberColumn(format="%.1f"),
-                           "K%": st.column_config.NumberColumn(format="%.1f")})
-    with r:
-        st.markdown("**Park-DEPENDENT power** — where they play changes what they are")
-        t = power.nlargest(12, "spread")[["batter_name", "hr_pct", "k_pct", "spread"]]
-        st.dataframe(t.rename(columns={"batter_name": "Hitter", "hr_pct": "HR%",
-            "k_pct": "K%", "spread": "Spread"}), hide_index=True, use_container_width=True,
-            column_config={"Spread": st.column_config.NumberColumn(format="%.3f"),
-                           "HR%": st.column_config.NumberColumn(format="%.1f"),
-                           "K%": st.column_config.NumberColumn(format="%.1f")})
 
     st.markdown("### The league at a glance")
     sc_df = players.dropna(subset=["hr_pct", "spread"])
@@ -1001,54 +993,58 @@ with tab5:
     st.markdown("""
 <div class="card">
 <h2>Methodology</h2>
-<p>The question: <b>which parks historically reward the exact types of contact this hitter
-produces?</b> Traditional park factors describe how a park plays for the average hitter; ParkFit
-asks how it plays for <i>this</i> one.</p>
-<h3>1. Career contact profiles, bucketed</h3>
-<p>Every batted ball from 2021 to the present — 619,205 in total — bucketed by handedness,
-batter-perspective spray direction (positive = pull, so RHH and LHH are compared correctly),
-launch angle, and exit velocity. No wall-geometry simulation: without reliable wind, temperature,
-spin, and wall data for every ball, a physics model looks advanced while being wrong. Historical
-outcomes by contact shape are the engine. Older park configurations and temporary home parks are
-used to fit the model, but rankings are shown only for the 30 parks in use for 2026, and only for
-hitters active in the most recent season.</p>
-<h3>2. Park effects from visiting hitters only</h3>
-<p>Park deltas are fit exclusively on visiting hitters (315,448 balls). Home hitters are a
-non-random sample — rosters are constructed and approaches coached to exploit the home park — so
-including them would contaminate park estimates with roster construction, and would leak a scored
-player's own home performance into his own score.</p>
-<h3>3. Residuals, not raw averages</h3>
-<p>Each ball's residual is its observed wOBA minus the league mean for its bucket. Park deltas are
-averages of residuals, removing hitter-quality and bucket-mix confounding: a park doesn't look
-homer-friendly just because good hitters visited it.</p>
-<h3>4. Hierarchical shrinkage</h3>
-<p>Fine cells (park × hand × spray × LA × EV) are thin exactly where the signal matters most —
-extreme pull, high EV, ideal air. Shrinking them toward zero would erase park sensitivity for
-pull-dependent hitters. Instead each level shrinks toward its parent: fine → coarse (EV collapsed)
-→ park × handedness → prior. The shrinkage constant was tuned by out-of-sample stability (k = 40),
-never against named-player comparisons.</p>
-<h3>5. Raw fit vs shape fit</h3>
-<p>Hitter-friendly parks — Coors, Great American, Fenway — top the <b>raw</b> rankings for nearly
-every hitter, because overall park quality is shared by all. <b>Fit vs Avg</b> subtracts the
-average same-handed fit in each park, isolating the pure player-park interaction: whose shape
-gains <i>more than the typical hitter</i> here. These values are honestly small; that is the true
-measured size of the effect. The Park Lens, the FA board, and the "Best Shape Fit" card all use
-this measure. The trade board detects each hitter's current home from his most recent home games
-and measures the upgrade to his best realistic park, excluding Coors Field.</p>
-<h3>Validation</h3>
-<p><b>Split-half stability:</b> fit separately on even- and odd-numbered games, each player's park
-rankings compared across the two independent fits — median Spearman <b>0.491 across 685
-hitters</b>, with instability concentrated in low-sample bench players, exactly where uncertainty
-should live. <b>Ground-ball check:</b> GB park deltas are half as dispersed as air-ball deltas
-(0.032 vs 0.064) — parks differentiate on balls in the air, as physics says they must.
-<b>Face validity:</b> the model independently ranks Minute Maid Park top-5 for Isaac Paredes —
-recovering the thesis behind an actual MLB trade — while ranking it 23rd for Vladimir
-Guerrero Jr.</p>
-<h3>Honest limitations</h3>
-<p>Contact only: strikeouts and walks are displayed for context, not folded into the projection.
-Aging, approach changes, pitcher quality, and lineup context are out of scope. Hit coordinates are
-occasionally missing on home runs (0.58% — audited, immaterial). Park eras (fence moves, temporary
-homes) use a manual table. A hitter's fingerprint is itself partly shaped by his home park, which
-no model of this kind can fully remove. The tool measures <i>fit</i>, not <i>talent</i>.</p>
+<p>Every park factor you've ever seen answers the same question: how does this ballpark play for
+the average hitter? ParkFit asks a different one how does it play for <i>this</i> hitter? No
+hitter is average. Isaac Paredes and Vladimir Guerrero Jr. are both right-handed power bats, and
+they need completely different ballparks, because one lives on pulled fly balls and the other
+scorches line drives everywhere. A model that can't tell them apart isn't measuring fit.</p>
+<h3>Start with the contact itself</h3>
+<p>The engine is simple to state: every batted ball since 2021 more than 619,000 of them gets
+sorted into a bucket by who hit it (lefty or righty), where it went off the bat (pull side through
+opposite field, always from the hitter's perspective), how hard it was hit, and at what angle.
+Then, for every park, we ask history: how did this exact type of contact do here, compared to the
+same contact everywhere else? No wall-geometry simulation, no wind models we don't have reliable
+enough data for every ball to do that honestly, and a model that pretends to is just wrong with
+extra steps. Historical outcomes are the engine.</p>
+<h3>Only visiting hitters count toward park effects</h3>
+<p>Home hitters are a trap. Teams build rosters and coach swings to exploit their own park
+Yankee Stadium's numbers are full of lefties acquired specifically to pull balls at that short
+porch. Include them and you're measuring roster construction, not the park. So park effects here
+come from visiting hitters only: a rotating, roughly league-average sample that has no idea which
+park it's about to play in.</p>
+<h3>Small samples borrow, they don't shout</h3>
+<p>The catch with fine grained buckets is that the cells that matter most extreme pull, high
+exit velocity, ideal launch are exactly the thinnest ones. Trust them raw and you get noise;
+zero them out and every pull hitter looks like every other hitter, which is the problem we
+started with. So each cell borrows strength from its parents: a thin park-specific cell leans on
+the same park's broader pattern, which leans on the park's overall effect. How much to trust the
+thin cells wasn't a judgment call it was chosen by splitting the data in half and picking the
+setting where both halves agreed most.</p>
+<h3>Raw fit vs shape fit</h3>
+<p>One thing jumps out fast: Coors, Great American, and Fenway top the raw rankings for nearly
+everyone, because a great hitter's park is great for all hitters. That's real, but it's not the
+interesting part. <b>Fit vs Avg</b> strips it out it asks how much more this hitter's contact
+mix earns at a park than the average same-handed hitter's would. That's the number behind the
+Best Shape Fit card, the Park Lens, the trade board, and the free agency board. The values look
+small. That's honest: park fit is a real edge, not a superpower, and pretending otherwise would
+be the fastest way to lose a sharp reader.</p>
+<h3>How we know it works</h3>
+<p>Three checks. First, stability: fit the model on half the data, fit it again on the other
+half, and see whether both halves rank parks the same way for each hitter median agreement of
+0.49 across 685 hitters, with the shakiest results belonging to low-sample bench players, which
+is exactly where uncertainty should live. Second, physics: ground balls shouldn't care much about
+parks (infields are basically identical), and in the fitted model they don't ground-ball park
+effects are half as dispersed as air-ball effects. Third, the eye test: without being told about
+a single wall, the model rediscovered Yankee Stadium's short porch, the Crawford Boxes, and
+Fenway's suppression of left-handed pull power and ranked Minute Maid a top-5 park for Paredes,
+the exact thesis behind a real MLB trade, while ranking it 23rd for Guerrero.</p>
+<h3>What it doesn't do</h3>
+<p>This is a contact only tool. Strikeouts and walks are shown for context but never folded into
+the projections; aging, approach changes, pitcher quality, and lineup context are all out of
+scope. A few technical honesty notes: hit coordinates are occasionally missing on home runs
+(0.58% — audited, immaterial); park configurations that changed recently, like Camden Yards and
+Sacramento, carry wider uncertainty than long-tenured parks; and a hitter's own profile is partly
+shaped by the park he calls home, which no model of this kind can fully remove. ParkFit measures
+<i>fit</i>, not <i>talent</i> where a swing plays best, not how good it is.</p>
 </div>
 """, unsafe_allow_html=True)
