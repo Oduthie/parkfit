@@ -148,7 +148,24 @@ st.markdown("""
 .tlogo { width:24px; height:24px; object-fit:contain; }
 .dtop { display:flex; justify-content:space-between; align-items:center; }
 @media (max-width:1100px){ .dgrid,.sgrid{grid-template-columns:repeat(2,1fr);} }
-@media (max-width:700px){ .dgrid,.sgrid{grid-template-columns:1fr;} .hero h1{font-size:2.1rem;} }
+@media (max-width:700px){
+ .dgrid,.sgrid{grid-template-columns:1fr;}
+ .block-container{padding-left:.9rem;padding-right:.9rem;}
+ .hero{padding:1.3rem 1.2rem;border-radius:18px;}
+ .hero h1{font-size:1.9rem;}
+ .hero p{font-size:.95rem;line-height:1.5;}
+ .pill{font-size:.72rem;padding:.3rem .6rem;}
+ .card{padding:1rem 1.1rem;border-radius:16px;}
+ .pheader{gap:.9rem;}
+ .hswrap{width:84px;height:84px;padding:3px;}
+ .hs{width:78px;height:78px;border-width:3px;}
+ .pname{font-size:1.45rem;}
+ .psub{font-size:.85rem;}
+ .badge{font-size:.72rem;padding:.3rem .55rem;}
+ .svalue{font-size:1.3rem;}
+ .insight{font-size:.92rem;padding:.85rem 1rem;}
+ .dtitle{font-size:.95rem;}
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -383,8 +400,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["Player Park Fit", "Compare Hitters", "League Insights", "Methodology"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["Player Park Fit", "Compare Hitters", "League Insights", "Game", "Methodology"])
 
 # ================= TAB 1 =================
 with tab1:
@@ -416,20 +433,23 @@ with tab1:
             badges += '<span class="badge b-orange">Provisional sample</span>'
         st.markdown(player_card(name, info, badges), unsafe_allow_html=True)
 
+        bestfit = pr.loc[pr["fit_vs_avg"].idxmax()]
         st.markdown('<div class="sgrid">'
-            + scard("Best Park", best["park"], f'{best["projected_contact_woba"]:.3f} proj wOBA')
+            + scard("Best Park (raw)", best["park"],
+                    f'{best["projected_contact_woba"]:.3f} proj wOBA — hitter parks '
+                    'top this for everyone')
+            + scard("Best Shape Fit", bestfit["park"],
+                    f'{bestfit["fit_vs_avg"]:+.4f} vs avg {info["stand_bucket"]} — '
+                    'HIS edge, park quality removed')
             + scard("Worst Park", worst["park"], f'{worst["projected_contact_woba"]:.3f} proj wOBA')
             + scard("Park Spread", f"{spread:.3f}",
                     f'{pct:.0f}th pct — '
                     + ("park-proof" if pct < 30 else "park-sensitive" if pct > 70 else "typical"))
-            + scard("Air-Pull%", fmt(info.get("pull_air_rate"), "{:.1%}"),
-                    "pulled balls in the air")
             + scard("HR% / K%",
                     f'{fmt(info.get("hr_pct"), "{:.1f}")} / {fmt(info.get("k_pct"), "{:.1f}")}',
                     "per BBE / per PA")
             + '</div>', unsafe_allow_html=True)
 
-        bestfit = pr.loc[pr["fit_vs_avg"].idxmax()]
         home_line = ""
         if has_home:
             if info["upgrade"] >= 0.010:
@@ -616,6 +636,37 @@ with tab3:
             st.caption("Not matched (name spelling, or below the batted-ball minimum): "
                        + ", ".join(missing_fa))
 
+    # ---- The Park Lens: who gains the most at each park? --------------
+    st.markdown("### The Park Lens — who gains the most at each park?")
+    st.markdown(
+        '<div class="insight">Coors, Cincinnati, and Fenway top the <b>raw</b> rankings for '
+        'nearly every hitter — that\'s park quality, shared by all. This view strips it out: '
+        '<b>Fit vs Avg</b> is each hitter\'s edge at this park <b>beyond the average '
+        'same-handed hitter</b>, so the names below are the ones whose specific contact shape '
+        'this park rewards most (and least). These are the honest sizes of the shape effect — '
+        'small numbers, real signal.</div>', unsafe_allow_html=True)
+    lens_park = st.selectbox("Park", sorted(CURRENT_PARKS_2026), key="lens_park")
+    lp = (scores[scores["park"] == lens_park]
+          .merge(players[["batter", "archetype", "tier"]], on="batter", how="left"))
+    lp = lp[lp["tier"] == "full"]
+    lens_cols = ["batter_name", "stand_bucket", "archetype", "fit_vs_avg",
+                 "park_fit_delta", "park_rank"]
+    lens_rename = {"batter_name": "Hitter", "stand_bucket": "Bats",
+                   "archetype": "Archetype", "fit_vs_avg": "Fit vs Avg",
+                   "park_fit_delta": "Raw Fit Δ", "park_rank": "His Rank"}
+    lens_cfg = {"Fit vs Avg": st.column_config.NumberColumn(format="%+.4f"),
+                "Raw Fit Δ": st.column_config.NumberColumn(format="%+.4f"),
+                "His Rank": st.column_config.NumberColumn(format="%.0f")}
+    l, r = st.columns(2)
+    with l:
+        st.markdown(f"**Gains the most at {lens_park}**")
+        st.dataframe(lp.nlargest(12, "fit_vs_avg")[lens_cols].rename(columns=lens_rename),
+                     hide_index=True, use_container_width=True, column_config=lens_cfg)
+    with r:
+        st.markdown(f"**Hurt the most at {lens_park}**")
+        st.dataframe(lp.nsmallest(12, "fit_vs_avg")[lens_cols].rename(columns=lens_rename),
+                     hide_index=True, use_container_width=True, column_config=lens_cfg)
+
     hb = players.dropna(subset=["upgrade", "home_rank"]).copy()
     n_excl = players["home_rank"].isna().sum()
 
@@ -684,8 +735,266 @@ with tab3:
     st.caption("Bottom-right = park-proof power. High-K hitters (bright) also face a second "
                "channel of park variation: strikeout environments (shown, not modeled).")
 
-# ================= TAB 4 =================
+# ================= TAB 4: GAME =================
 with tab4:
+    import random
+
+    st.markdown("### Higher or Lower: Park Edition")
+
+    @st.cache_data
+    def _load_game_deltas(stamp):
+        d2 = pd.read_parquet(ROOT / "data" / "model" / "deltas_coarse.parquet")
+        try:
+            ph2 = pd.read_parquet(ROOT / "data" / "model" / "deltas_parkhand.parquet")
+        except Exception:
+            ph2 = pd.DataFrame()
+        return d2, ph2
+
+    _mp = ROOT / "data" / "model" / "deltas_coarse.parquet"
+    if not _mp.exists():
+        st.info("The game needs data/model/deltas_coarse.parquet (created by "
+                "scripts/02_fit_bucket_model.py).")
+    else:
+        d2, ph2 = _load_game_deltas((_mp.stat().st_mtime,))
+
+        game_pool_df = (players[players["tier"] == "full"]
+                        .sort_values("n_balls", ascending=False).head(250))
+        pool_by_hand = {
+            "RHH": game_pool_df[game_pool_df["stand_bucket"] == "RHH"]["batter"].tolist(),
+            "LHH": game_pool_df[game_pool_df["stand_bucket"] == "LHH"]["batter"].tolist(),
+        }
+        game_pool = game_pool_df["batter"].tolist()
+        delta_lookup = scores.set_index(["batter", "park"])["park_fit_delta"]
+
+        MODES = {
+            "Casual": dict(min_gap=0.004, max_gap=99, same_hand=False,
+                           show_stats=True, show_blurb=True),
+            "Scout": dict(min_gap=0.0022, max_gap=0.010, same_hand=True,
+                          show_stats=False, show_blurb=True),
+            "Front Office": dict(min_gap=0.0012, max_gap=0.006, same_hand=True,
+                                 show_stats=False, show_blurb=False),
+        }
+
+        def park_hero(park):
+            meta = team_meta(park)
+            d = park_dims(park)
+            svg = ""
+            pills = ""
+            if d:
+                lf, cf, rf = int(d["lf_line"]), int(d["cf"]), int(d["rf_line"])
+                svg = field_svg(lf, cf, rf, "#ffffff", meta[3])
+                pills = ('<div class="dpills" style="max-width:320px;margin:.6rem auto 0">'
+                         + "".join(
+                    f'<div class="dpill" style="background:rgba(255,255,255,.14);'
+                    f'border-color:rgba(255,255,255,.25)">'
+                    f'<div class="dpl" style="color:#e2e8f0">{lab}</div>'
+                    f'<div class="dpv" style="color:#fff">{v}</div></div>'
+                    for lab, v in [("LF", lf), ("CF", cf), ("RF", rf)]) + '</div>')
+            lg = (f'<img src="{logo(meta[1])}" style="width:52px;height:52px;'
+                  f'object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.4))">'
+                  if meta[1] else "")
+            return (f'<div style="background:linear-gradient(135deg,{meta[2]} 0%,#0b1f3a 130%);'
+                    f'border-radius:20px;padding:1.3rem 1.4rem;margin:.6rem 0 1rem 0;'
+                    f'box-shadow:0 14px 34px rgba(15,23,42,.28);text-align:center;color:#fff">'
+                    f'<div style="display:flex;align-items:center;justify-content:center;'
+                    f'gap:.8rem">{lg}<div style="font-size:1.6rem;font-weight:900;'
+                    f'letter-spacing:-.02em">{html.escape(park)}</div></div>'
+                    f'<div style="max-width:340px;margin:0 auto">{svg}</div>{pills}</div>')
+
+        def _phrase(r):
+            spray = {"ExtremePull": "extreme pull-side", "Pull": "pull-side",
+                     "Center": "center-field", "Oppo": "opposite-field",
+                     "ExtremeOppo": "extreme oppo"}.get(r["spray_bucket"], r["spray_bucket"])
+            la = {"Low": "low liners", "Line": "line drives", "IdealAir": "ideal-air flies",
+                  "HighAir": "high flies"}.get(r["la_bucket"], r["la_bucket"])
+            return f'{r["stand_bucket"]} {spray} {la}'
+
+        def park_blurb(park, with_numbers=True):
+            sub = d2[(d2["park"] == park)
+                     & (~d2["la_bucket"].isin(["GB", "Popup"]))
+                     & (d2["l2_n"] >= 80)]
+            tops = sub.nlargest(2, "delta_l2")
+            bots = sub.nsmallest(2, "delta_l2")
+            if with_numbers:
+                rewards = " · ".join(f'{_phrase(r)} ({r["delta_l2"]:+.3f})'
+                                     for _, r in tops.iterrows())
+                punishes = " · ".join(f'{_phrase(r)} ({r["delta_l2"]:+.3f})'
+                                      for _, r in bots.iterrows())
+            else:
+                rewards = " · ".join(_phrase(r) for _, r in tops.iterrows())
+                punishes = " · ".join(_phrase(r) for _, r in bots.iterrows())
+            return (f'<div class="insight"><b>How it plays:</b> rewards {rewards or "—"}. '
+                    f'Punishes {punishes or "—"}.'
+                    '<br><span style="color:#64748b;font-size:.85rem">From historical '
+                    'outcomes vs league average for each contact type, visiting hitters '
+                    'only.</span></div>')
+
+        def new_round(park_choice, mode):
+            cfg = MODES[mode]
+            park = (random.choice(sorted(CURRENT_PARKS_2026))
+                    if park_choice == "🎲 Random park" else park_choice)
+            pair = None
+            for _ in range(120):
+                if cfg["same_hand"]:
+                    hand = random.choice(["RHH", "LHH"])
+                    if len(pool_by_hand[hand]) < 2:
+                        continue
+                    a, b = random.sample(pool_by_hand[hand], 2)
+                else:
+                    a, b = random.sample(game_pool, 2)
+                try:
+                    da = float(delta_lookup.loc[(a, park)])
+                    db = float(delta_lookup.loc[(b, park)])
+                except KeyError:
+                    continue
+                gap = abs(da - db)
+                if cfg["min_gap"] <= gap <= cfg["max_gap"]:
+                    pair = (a, b, da, db)
+                    break
+            if pair is None:
+                return None
+            a, b, da, db = pair
+            return {"park": park, "a": a, "b": b, "da": da, "db": db,
+                    "revealed": False, "picked": None, "mode": mode}
+
+        if "game_streak" not in st.session_state:
+            st.session_state.game_streak = 0
+            st.session_state.game_best = 0
+            st.session_state.game_round_id = 0
+            st.session_state.game = None
+
+        cc1, cc2 = st.columns([1.4, 1])
+        with cc1:
+            park_options = ["🎲 Random park"] + sorted(CURRENT_PARKS_2026)
+            park_choice = st.selectbox("Park", park_options, key="game_park_choice")
+        with cc2:
+            mode = st.selectbox("Difficulty", list(MODES.keys()), key="game_mode",
+                help="Casual: full scouting info, clear gaps. Scout: same-handed "
+                     "hitters, no stat lines. Front Office: park intel hidden until "
+                     "after your call, razor-thin gaps.")
+
+        g = st.session_state.game
+        needs_new = (
+            g is None
+            or g.get("mode") != mode
+            or (park_choice != "🎲 Random park" and g["park"] != park_choice
+                and not g["revealed"])
+        )
+        if needs_new:
+            st.session_state.game = new_round(park_choice, mode)
+            st.session_state.game_round_id += 1
+            g = st.session_state.game
+
+        if g is None:
+            st.warning("Couldn't build a matchup for that park/difficulty — try another.")
+        else:
+            cfg = MODES[g["mode"]]
+            s1, s2 = st.columns(2)
+            s1.metric("Streak 🔥", st.session_state.game_streak)
+            s2.metric("Best", st.session_state.game_best)
+
+            st.markdown(park_hero(g["park"]), unsafe_allow_html=True)
+            if cfg["show_blurb"] or g["revealed"]:
+                st.markdown(park_blurb(g["park"], with_numbers=g["revealed"]),
+                            unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="insight">🕶️ <b>Front Office mode:</b> no park '
+                            'intel until you commit. You should know your parks.</div>',
+                            unsafe_allow_html=True)
+
+            pa_row = players[players["batter"] == g["a"]].iloc[0]
+            pb_row = players[players["batter"] == g["b"]].iloc[0]
+
+            def game_card(row, show_stats):
+                if show_stats:
+                    sub_line = (f'{row["stand_bucket"]} · '
+                                f'{fmt(row.get("archetype"), "{}")} · '
+                                f'EV {fmt(row.get("avg_ev"), "{:.1f}")} · '
+                                f'Pull Air {fmt(row.get("pull_air_rate"), "{:.1%}")}')
+                else:
+                    sub_line = f'{row["stand_bucket"]}'
+                return (f'<div class="card" style="margin-bottom:.6rem;text-align:center">'
+                        f'<div class="hswrap" style="width:96px;height:96px;padding:3px;'
+                        f'margin:0 auto"><img class="hs" style="width:90px;height:90px" '
+                        f'src="{headshot(row["batter"])}"></div>'
+                        f'<div class="pname" style="font-size:1.3rem;margin-top:.5rem">'
+                        f'{html.escape(str(row["batter_name"]))}</div>'
+                        f'<div class="psub">{sub_line}</div></div>')
+
+            st.markdown(f"#### Whose contact shape fits **{g['park']}** better?")
+            colA, colB = st.columns(2)
+            with colA:
+                st.markdown(game_card(pa_row, cfg["show_stats"]), unsafe_allow_html=True)
+                if not g["revealed"]:
+                    if st.button(f"{pa_row['batter_name']}",
+                                 key=f"pickA_{st.session_state.game_round_id}",
+                                 use_container_width=True):
+                        g["picked"] = "a"
+                        g["revealed"] = True
+                        if g["da"] > g["db"]:
+                            st.session_state.game_streak += 1
+                        else:
+                            st.session_state.game_streak = 0
+                        st.session_state.game_best = max(
+                            st.session_state.game_best, st.session_state.game_streak)
+                        st.rerun()
+            with colB:
+                st.markdown(game_card(pb_row, cfg["show_stats"]), unsafe_allow_html=True)
+                if not g["revealed"]:
+                    if st.button(f"{pb_row['batter_name']}",
+                                 key=f"pickB_{st.session_state.game_round_id}",
+                                 use_container_width=True):
+                        g["picked"] = "b"
+                        g["revealed"] = True
+                        if g["db"] > g["da"]:
+                            st.session_state.game_streak += 1
+                        else:
+                            st.session_state.game_streak = 0
+                        st.session_state.game_best = max(
+                            st.session_state.game_best, st.session_state.game_streak)
+                        st.rerun()
+
+            if g["revealed"]:
+                winner_is_a = g["da"] > g["db"]
+                picked_winner = (g["picked"] == "a") == winner_is_a
+                win_row = pa_row if winner_is_a else pb_row
+                if picked_winner:
+                    st.success(f"✅ Correct — **{win_row['batter_name']}** fits "
+                               f"{g['park']} better.")
+                else:
+                    st.error(f"❌ Not this time — **{win_row['batter_name']}** fits "
+                             f"{g['park']} better.")
+
+                def why(batter_id):
+                    subc = contributions[(contributions["batter"] == batter_id)
+                                         & (contributions["park"] == g["park"])].copy()
+                    if subc.empty:
+                        return "—"
+                    air = subc[subc["la_bucket"] != "GB"]
+                    if not air.empty:
+                        subc = air
+                    r = subc.loc[subc["bucket_contribution"].abs().idxmax()]
+                    arrow = "▲" if r["bucket_contribution"] > 0 else "▼"
+                    return (f'{arrow} {r["spray_bucket"]} {r["la_bucket"]} '
+                            f'{r["ev_bucket"]} mph ({r["bucket_contribution"]:+.4f})')
+
+                r1, r2 = st.columns(2)
+                r1.metric(pa_row["batter_name"], f'{g["da"]:+.4f}',
+                          help="Park Fit Δ at this park")
+                r1.caption(why(g["a"]))
+                r2.metric(pb_row["batter_name"], f'{g["db"]:+.4f}',
+                          help="Park Fit Δ at this park")
+                r2.caption(why(g["b"]))
+
+                if st.button("Next matchup ⚾", type="primary",
+                             key=f"next_{st.session_state.game_round_id}",
+                             use_container_width=True):
+                    st.session_state.game = new_round(park_choice, mode)
+                    st.session_state.game_round_id += 1
+                    st.rerun()
+
+# ================= TAB 5 =================
+with tab5:
     st.markdown("""
 <div class="card">
 <h2>Methodology</h2>
@@ -715,13 +1024,14 @@ extreme pull, high EV, ideal air. Shrinking them toward zero would erase park se
 pull-dependent hitters. Instead each level shrinks toward its parent: fine → coarse (EV collapsed)
 → park × handedness → prior. The shrinkage constant was tuned by out-of-sample stability (k = 40),
 never against named-player comparisons.</p>
-<h3>5. Scoring, Fit vs Avg, the trade board, and the FA board</h3>
-<p>A player's bucket-frequency fingerprint is dotted with each park's shrunk deltas. <b>Fit vs
-Avg</b> subtracts the average same-handed fit in each park, isolating the pure player-park
-interaction — these values are honestly small; that is the true measured size of the effect. The
-trade board detects each hitter's current home from his most recent home games and measures the
-upgrade to his best realistic park, excluding Coors Field. The free agency board applies the same
-lens to the upcoming class.</p>
+<h3>5. Raw fit vs shape fit</h3>
+<p>Hitter-friendly parks — Coors, Great American, Fenway — top the <b>raw</b> rankings for nearly
+every hitter, because overall park quality is shared by all. <b>Fit vs Avg</b> subtracts the
+average same-handed fit in each park, isolating the pure player-park interaction: whose shape
+gains <i>more than the typical hitter</i> here. These values are honestly small; that is the true
+measured size of the effect. The Park Lens, the FA board, and the "Best Shape Fit" card all use
+this measure. The trade board detects each hitter's current home from his most recent home games
+and measures the upgrade to his best realistic park, excluding Coors Field.</p>
 <h3>Validation</h3>
 <p><b>Split-half stability:</b> fit separately on even- and odd-numbered games, each player's park
 rankings compared across the two independent fits — median Spearman <b>0.491 across 685
