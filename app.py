@@ -46,8 +46,7 @@ HOME_REMAP = {
     "Oakland Coliseum": "Sutter Health Park",
 }
 
-FA_FILE_CANDIDATES = [ROOT / "free_agents_2026.csv",
-                      ROOT.parent / "free_agents_2026.csv"]
+FA_FILE = ROOT / "free_agents_2026.csv"
 
 
 def norm_name(s):
@@ -637,11 +636,25 @@ if page == "League Insights":
 
     # ---- 2026-27 Free Agency board -----------------------------------
     fa_names = []
-    for cand in FA_FILE_CANDIDATES:
-        if cand.exists():
-            fa_names = [ln.strip() for ln in cand.read_text().splitlines()
-                        if ln.strip() and not ln.lower().startswith("name")]
-            break
+
+if FA_FILE.exists():
+    fa_source = pd.read_csv(FA_FILE)
+
+    if "name" not in fa_source.columns:
+        st.error("free_agents_2026.csv must contain a column called 'name'.")
+    else:
+        fa_names = (
+            fa_source["name"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .tolist()
+        )
+
+    # Temporary diagnostic so you can confirm the correct file is loading
+    st.caption(f"Free-agent file loaded from: {FA_FILE}")
+else:
+    st.error(f"Could not find: {FA_FILE}")
     st.markdown("### 2026-27 Free Agency board — where should the market's bats land?")
     if not fa_names:
         st.info("Add free_agents_2026.csv (one hitter name per line) next to app.py "
