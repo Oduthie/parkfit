@@ -208,7 +208,7 @@ scores, profiles, contributions, extras, park_k_df, dims_raw = load_all()
 # ---- 2026 view: only parks in use this season, only recent hitters --------
 scores = scores[scores["park"].isin(CURRENT_PARKS_2026)].copy()
 if not extras.empty and "last_year" in extras.columns:
-    active_ids = set(extras.loc[extras["last_year"] >= 2024, "batter"])
+    active_ids = set(extras.loc[extras["last_year"] >= 2025, "batter"])
     scores = scores[scores["batter"].isin(active_ids)]
 contributions = contributions[contributions["park"].isin(CURRENT_PARKS_2026)]
 
@@ -406,11 +406,18 @@ if "nav" not in st.session_state:
     st.session_state.nav = PAGES[0]
 if "jump_n" not in st.session_state:
     st.session_state.jump_n = 0
+if st.session_state.get("back_to"):
+    if st.button(f"← Back to {st.session_state.back_to}"):
+        st.session_state.nav = st.session_state.back_to
+        st.session_state.back_to = None
+        st.session_state.jump_n += 1
+        st.rerun()
 _page = st.radio("Navigate", PAGES, horizontal=True,
                  index=PAGES.index(st.session_state.nav),
                  label_visibility="collapsed")
 if _page != st.session_state.nav:
     st.session_state.nav = _page
+    st.session_state.back_to = None
 page = st.session_state.nav
 
 
@@ -422,6 +429,7 @@ def row_jump(event, df, field, state_key, target_page):
         rows = []
     if rows:
         st.session_state[state_key] = df.iloc[rows[0]][field]
+        st.session_state.back_to = st.session_state.nav
         st.session_state.nav = target_page
         st.session_state.jump_n += 1
         st.rerun()
