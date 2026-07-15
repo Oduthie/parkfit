@@ -205,10 +205,10 @@ def load_all():
 
 scores, profiles, contributions, extras, park_k_df, dims_raw = load_all()
 
-# ---- 2026 view: only parks in use this season, only active hitters --------
+# ---- 2026 view: only parks in use this season, only recent hitters --------
 scores = scores[scores["park"].isin(CURRENT_PARKS_2026)].copy()
 if not extras.empty and "last_year" in extras.columns:
-    active_ids = set(extras.loc[extras["last_year"] >= 2025, "batter"])
+    active_ids = set(extras.loc[extras["last_year"] >= 2024, "batter"])
     scores = scores[scores["batter"].isin(active_ids)]
 contributions = contributions[contributions["park"].isin(CURRENT_PARKS_2026)]
 
@@ -218,9 +218,8 @@ scores["park_rank"] = (scores.groupby("batter")["park_fit_delta"]
 _dep = scores.groupby("batter")["park_fit_delta"].agg(lambda s: s.max() - s.min())
 scores["park_dependency_score"] = scores["batter"].map(_dep)
 
-# Fit vs Avg (old-site semantics): this park's delta for the player, minus
-# the average delta of same-handed scored hitters in that park — the pure
-# player-park interaction above/below the typical RHH/LHH.
+# Fit vs Avg: this park's delta for the player, minus the average delta of
+# same-handed scored hitters in that park — the pure player-park interaction.
 hand_avg = (scores.groupby(["park", "stand_bucket"], observed=True)["park_fit_delta"]
             .transform("mean"))
 scores = scores.assign(fit_vs_avg=(scores["park_fit_delta"] - hand_avg).round(4))
@@ -247,7 +246,7 @@ else:
     for c in ["k_pct", "bb_pct", "hr_pct", "home_park", "pa"]:
         players[c] = pd.NA
 
-# Home rank + realistic upgrade (Coors excluded, like the old trade board).
+# Home rank + best landing spot (Coors excluded), measured in shape fit.
 home_rows = []
 for _, p in players.dropna(subset=["home_park"]).iterrows():
     s = scores[scores["batter"] == p["batter"]]
@@ -402,12 +401,39 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["Player Park Fit", "Compare Hitters", "League Insights", "Game", "Methodology"])
+PAGES = ["Player Park Fit", "Compare Hitters", "League Insights", "Game", "Methodology"]
+if "nav" not in st.session_state:
+    st.session_state.nav = PAGES[0]
+if "jump_n" not in st.session_state:
+    st.session_state.jump_n = 0
+_page = st.radio("Navigate", PAGES, horizontal=True,
+                 index=PAGES.index(st.session_state.nav),
+                 label_visibility="collapsed")
+if _page != st.session_state.nav:
+    st.session_state.nav = _page
+page = st.session_state.nav
 
-# ================= TAB 1 =================
-with tab1:
-    name = st.selectbox("Choose hitter", sorted(players["batter_name"].dropna().unique()))
+
+def row_jump(event, df, field, state_key, target_page):
+    """Click a table row -> jump to the relevant page with it preloaded."""
+    try:
+        rows = event.selection.rows
+    except Exception:
+        rows = []
+    if rows:
+        st.session_state[state_key] = df.iloc[rows[0]][field]
+        st.session_state.nav = target_page
+        st.session_state.jump_n += 1
+        st.rerun()
+
+# ================= PAGE 1 =================
+if page == "Player Park Fit":
+    _plist = sorted(players["batter_name"].dropna().unique())
+    if "sel_player" not in st.session_state or st.session_state.sel_player not in _plist:
+        st.session_state.sel_player = _plist[0]
+    name = st.selectbox("Choose hitter", _plist,
+                        index=_plist.index(st.session_state.sel_player))
+    st.session_state.sel_player = name
     if name:
         info = players[players["batter_name"] == name].iloc[0]
         pr = scores[scores["batter_name"] == name].sort_values("park_rank").copy()
@@ -483,11 +509,15 @@ with tab1:
                 columns={"park_rank": "Rank", "park": "Park",
                          "projected_contact_woba": "Proj wOBA", "fit_vs_avg": "Fit vs Avg",
                          "park_k_pct": "Park K%", "driver": "Primary driver"})
-            st.dataframe(show, hide_index=True, use_container_width=True, height=table_h,
+            ev = st.dataframe(show, hide_index=True, use_container_width=True,
+                height=table_h, on_select="rerun", selection_mode="single-row",
+                key=f"tbl_rank_{st.session_state.jump_n}",
                 column_config={
                     "Proj wOBA": st.column_config.NumberColumn(format="%.3f"),
                     "Fit vs Avg": st.column_config.NumberColumn(format="%+.4f"),
                     "Park K%": st.column_config.NumberColumn(format="%.1f")})
+            row_jump(ev, show, "Park", "lens_park_sel", "League Insights")
+            st.caption("Click any park row to open it in the Park Lens.")
         with r:
             st.markdown("### Projection Chart")
             st.altair_chart(rank_chart(pr, table_h), use_container_width=True)
@@ -525,8 +555,8 @@ with tab1:
             st.caption("Contribution = how often he creates that contact × how much this park "
                        "rewards it vs league average.")
 
-# ================= TAB 2 =================
-with tab2:
+# ================= PAGE 2 =================
+if page == "Compare Hitters":
     names = sorted(players["batter_name"].dropna().unique())
     c1, c2 = st.columns(2)
     with c1:
@@ -586,8 +616,8 @@ with tab2:
     elif pa == pb:
         st.info("Choose two different hitters.")
 
-# ================= TAB 3 =================
-with tab3:
+# ================= PAGE 3 =================
+if page == "League Insights":
     st.markdown(
         '<div class="insight"><b>Quick glossary.</b> <b>Raw Fit Δ</b> — how much a park boosts '
         'or hurts this hitter\'s contact overall; hitter-friendly parks score high for everyone. '
@@ -626,22 +656,26 @@ with tab3:
                 "Archetype": p.get("archetype", "—"),
                 "Spread": p["spread"],
                 "Best Fit": s.iloc[0]["park"],
-                "Fit Δ": s.iloc[0]["fit_vs_avg"],
+                "Shape Edge": s.iloc[0]["fit_vs_avg"],
                 "2nd": s.iloc[1]["park"] if len(s) > 1 else "—",
                 "3rd": s.iloc[2]["park"] if len(s) > 2 else "—",
             })
         if fa_rows:
-            fa_df = pd.DataFrame(fa_rows).sort_values("Fit Δ", ascending=False)
+            fa_df = pd.DataFrame(fa_rows).sort_values("Shape Edge", ascending=False)
             st.markdown(
                 '<div class="insight">Upcoming 2026-27 free agent hitters, ranked by how '
                 'much their <b>best realistic landing spot</b> (Coors excluded) rewards their '
                 'contact shape. High-spread names are the ones where the signing park genuinely '
                 'changes the player. Edit <b>free_agents_2026.csv</b> to update the class.</div>',
                 unsafe_allow_html=True)
-            st.dataframe(fa_df, hide_index=True, use_container_width=True,
+            ev = st.dataframe(fa_df, hide_index=True, use_container_width=True,
+                on_select="rerun", selection_mode="single-row",
+                key=f"tbl_fa_{st.session_state.jump_n}",
                 column_config={
                     "Spread": st.column_config.NumberColumn(format="%.3f"),
-                    "Fit Δ": st.column_config.NumberColumn(format="%+.4f")})
+                    "Shape Edge": st.column_config.NumberColumn(format="%+.4f")})
+            row_jump(ev, fa_df, "Hitter", "sel_player", "Player Park Fit")
+            st.caption("Click any hitter to open his Park Fit page.")
         missing_fa = [fa for fa in fa_names if norm_name(fa) not in name_map]
         if missing_fa:
             st.caption("Not matched (name spelling, or below the batted-ball minimum): "
@@ -652,11 +686,17 @@ with tab3:
     st.markdown(
         '<div class="insight">Coors, Cincinnati, and Fenway top the <b>raw</b> rankings for '
         'nearly every hitter — that\'s park quality, shared by all. This view strips it out: '
-        '<b>Fit vs Avg</b> is each hitter\'s edge at this park <b>beyond the average '
+        '<b>Shape Edge</b> is each hitter\'s edge at this park <b>beyond the average '
         'same-handed hitter</b>, so the names below are the ones whose specific contact shape '
         'this park rewards most (and least). These are the honest sizes of the shape effect — '
         'small numbers, real signal.</div>', unsafe_allow_html=True)
-    lens_park = st.selectbox("Park", sorted(CURRENT_PARKS_2026), key="lens_park")
+    _parks = sorted(CURRENT_PARKS_2026)
+    if ("lens_park_sel" not in st.session_state
+            or st.session_state.lens_park_sel not in _parks):
+        st.session_state.lens_park_sel = _parks[0]
+    lens_park = st.selectbox("Park", _parks,
+                             index=_parks.index(st.session_state.lens_park_sel))
+    st.session_state.lens_park_sel = lens_park
     lp = (scores[scores["park"] == lens_park]
           .merge(players[["batter", "archetype", "tier"]].drop_duplicates("batter"),
                  on="batter", how="left"))
@@ -664,20 +704,29 @@ with tab3:
     lens_cols = ["batter_name", "stand_bucket", "archetype", "fit_vs_avg",
                  "park_fit_delta", "park_rank"]
     lens_rename = {"batter_name": "Hitter", "stand_bucket": "Bats",
-                   "archetype": "Archetype", "fit_vs_avg": "Fit vs Avg",
+                   "archetype": "Archetype", "fit_vs_avg": "Shape Edge",
                    "park_fit_delta": "Raw Fit Δ", "park_rank": "His Rank"}
-    lens_cfg = {"Fit vs Avg": st.column_config.NumberColumn(format="%+.4f"),
+    lens_cfg = {"Shape Edge": st.column_config.NumberColumn(format="%+.4f"),
                 "Raw Fit Δ": st.column_config.NumberColumn(format="%+.4f"),
                 "His Rank": st.column_config.NumberColumn(format="%.0f")}
     l, r = st.columns(2)
     with l:
         st.markdown(f"**Gains the most at {lens_park}**")
-        st.dataframe(lp.nlargest(12, "fit_vs_avg")[lens_cols].rename(columns=lens_rename),
-                     hide_index=True, use_container_width=True, column_config=lens_cfg)
+        _t = lp.nlargest(12, "fit_vs_avg")[lens_cols].rename(columns=lens_rename)
+        ev = st.dataframe(_t, hide_index=True, use_container_width=True,
+                          on_select="rerun", selection_mode="single-row",
+                          key=f"tbl_lens_a_{st.session_state.jump_n}",
+                          column_config=lens_cfg)
+        row_jump(ev, _t, "Hitter", "sel_player", "Player Park Fit")
     with r:
         st.markdown(f"**Hurt the most at {lens_park}**")
-        st.dataframe(lp.nsmallest(12, "fit_vs_avg")[lens_cols].rename(columns=lens_rename),
-                     hide_index=True, use_container_width=True, column_config=lens_cfg)
+        _t = lp.nsmallest(12, "fit_vs_avg")[lens_cols].rename(columns=lens_rename)
+        ev = st.dataframe(_t, hide_index=True, use_container_width=True,
+                          on_select="rerun", selection_mode="single-row",
+                          key=f"tbl_lens_b_{st.session_state.jump_n}",
+                          column_config=lens_cfg)
+        row_jump(ev, _t, "Hitter", "sel_player", "Player Park Fit")
+    st.caption("Click any hitter to open his Park Fit page.")
 
     hb = players.dropna(subset=["upgrade", "home_rank"]).copy()
     n_excl = players["home_rank"].isna().sum()
@@ -685,29 +734,38 @@ with tab3:
     st.markdown("### The trade board — who's in the wrong park?")
     st.markdown(
         '<div class="insight">Each hitter\'s current home ranked against all parks <b>for his '
-        'specific contact profile</b>. Upgrade is measured against his best <b>realistic</b> park '
-        '— Coors is excluded, since it tops nearly every list and would reduce the board to '
-        'distance-from-Denver. A home ranking in the 20s is fit value a front office can acquire '
-        'for free.</div>', unsafe_allow_html=True)
+        'specific contact profile</b>. The gain is measured in <b>shape fit</b> — how much more '
+        'his exact contact mix earns at his best landing spot (Coors excluded) than at home, with '
+        'overall park quality removed (so the answer isn\'t just "trade everyone to '
+        'Cincinnati"). Coors is excluded. A home ranking in the 20s is fit value a front office '
+        'can acquire for free.</div>', unsafe_allow_html=True)
     l, r = st.columns(2)
     with l:
         st.markdown("**Most held back** (worst home-park fits)")
-        t = hb.sort_values(["home_rank", "upgrade"], ascending=[False, False]).head(12)[
-            ["batter_name", "home_park", "home_rank", "alt_park", "upgrade"]]
-        st.dataframe(t.rename(columns={"batter_name": "Hitter", "home_park": "Home",
-            "home_rank": "Home Rk", "alt_park": "Best Realistic", "upgrade": "wOBA Gain"}),
-            hide_index=True, use_container_width=True,
-            column_config={"wOBA Gain": st.column_config.NumberColumn(format="%+.3f"),
+        _t = hb.sort_values(["home_rank", "upgrade"], ascending=[False, False]).head(12)[
+            ["batter_name", "home_park", "home_rank", "alt_park", "upgrade"]].rename(
+            columns={"batter_name": "Hitter", "home_park": "Home",
+                     "home_rank": "Home Rk", "alt_park": "Best Landing Spot",
+                     "upgrade": "Shape Gain"})
+        ev = st.dataframe(_t, hide_index=True, use_container_width=True,
+            on_select="rerun", selection_mode="single-row",
+            key=f"tbl_tb_a_{st.session_state.jump_n}",
+            column_config={"Shape Gain": st.column_config.NumberColumn(format="%+.3f"),
                            "Home Rk": st.column_config.NumberColumn(format="%.0f")})
+        row_jump(ev, _t, "Hitter", "sel_player", "Player Park Fit")
     with r:
         st.markdown("**Best-situated** (home is near-optimal)")
-        t = hb.sort_values(["home_rank", "upgrade"]).head(12)[
-            ["batter_name", "home_park", "home_rank", "upgrade"]]
-        st.dataframe(t.rename(columns={"batter_name": "Hitter", "home_park": "Home",
-            "home_rank": "Home Rk", "upgrade": "wOBA Gain"}),
-            hide_index=True, use_container_width=True,
-            column_config={"wOBA Gain": st.column_config.NumberColumn(format="%+.3f"),
+        _t = hb.sort_values(["home_rank", "upgrade"]).head(12)[
+            ["batter_name", "home_park", "home_rank", "upgrade"]].rename(
+            columns={"batter_name": "Hitter", "home_park": "Home",
+                     "home_rank": "Home Rk", "upgrade": "Shape Gain"})
+        ev = st.dataframe(_t, hide_index=True, use_container_width=True,
+            on_select="rerun", selection_mode="single-row",
+            key=f"tbl_tb_b_{st.session_state.jump_n}",
+            column_config={"Shape Gain": st.column_config.NumberColumn(format="%+.3f"),
                            "Home Rk": st.column_config.NumberColumn(format="%.0f")})
+        row_jump(ev, _t, "Hitter", "sel_player", "Player Park Fit")
+    st.caption("Click any hitter to open his Park Fit page.")
     if n_excl:
         st.caption(f"{n_excl} hitters excluded from the board (no home park detected — "
                    f"typically too few recent home batted balls).")
@@ -727,8 +785,8 @@ with tab3:
     st.caption("Bottom-right = park-proof power. High-K hitters (bright) also face a second "
                "channel of park variation: strikeout environments (shown, not modeled).")
 
-# ================= TAB 4: GAME =================
-with tab4:
+# ================= PAGE 4: GAME =================
+if page == "Game":
     import random
 
     st.markdown("### Higher or Lower: Park Edition")
@@ -988,8 +1046,8 @@ with tab4:
                     st.session_state.game_round_id += 1
                     st.rerun()
 
-# ================= TAB 5 =================
-with tab5:
+# ================= PAGE 5 =================
+if page == "Methodology":
     st.markdown("""
 <div class="card">
 <h2>Methodology</h2>
@@ -1013,17 +1071,17 @@ porch. Include them and you're measuring roster construction, not the park. So p
 come from visiting hitters only: a rotating, roughly league-average sample that has no idea which
 park it's about to play in.</p>
 <h3>Small samples borrow, they don't shout</h3>
-<p>The catch with fine grained buckets is that the cells that matter most extreme pull, high
+<p>The catch with fine-grained buckets is that the cells that matter most extreme pull, high
 exit velocity, ideal launch are exactly the thinnest ones. Trust them raw and you get noise;
 zero them out and every pull hitter looks like every other hitter, which is the problem we
 started with. So each cell borrows strength from its parents: a thin park-specific cell leans on
 the same park's broader pattern, which leans on the park's overall effect. How much to trust the
 thin cells wasn't a judgment call it was chosen by splitting the data in half and picking the
 setting where both halves agreed most.</p>
-<h3>Raw fit vs shape fit</h3>
+<h3>Raw fit vs shape edge</h3>
 <p>One thing jumps out fast: Coors, Great American, and Fenway top the raw rankings for nearly
 everyone, because a great hitter's park is great for all hitters. That's real, but it's not the
-interesting part. <b>Fit vs Avg</b> strips it out it asks how much more this hitter's contact
+interesting part. <b>Shape Edge</b> strips it out it asks how much more this hitter's contact
 mix earns at a park than the average same-handed hitter's would. That's the number behind the
 Best Shape Fit card, the Park Lens, the trade board, and the free agency board. The values look
 small. That's honest: park fit is a real edge, not a superpower, and pretending otherwise would
@@ -1039,7 +1097,7 @@ a single wall, the model rediscovered Yankee Stadium's short porch, the Crawford
 Fenway's suppression of left-handed pull power and ranked Minute Maid a top-5 park for Paredes,
 the exact thesis behind a real MLB trade, while ranking it 23rd for Guerrero.</p>
 <h3>What it doesn't do</h3>
-<p>This is a contact only tool. Strikeouts and walks are shown for context but never folded into
+<p>This is a contact-only tool. Strikeouts and walks are shown for context but never folded into
 the projections; aging, approach changes, pitcher quality, and lineup context are all out of
 scope. A few technical honesty notes: hit coordinates are occasionally missing on home runs
 (0.58% — audited, immaterial); park configurations that changed recently, like Camden Yards and
@@ -1048,3 +1106,8 @@ shaped by the park he calls home, which no model of this kind can fully remove. 
 <i>fit</i>, not <i>talent</i> where a swing plays best, not how good it is.</p>
 </div>
 """, unsafe_allow_html=True)
+
+st.markdown(
+    '<div style="text-align:center;color:#94a3b8;font-weight:700;font-size:.85rem;'
+    'padding:1.6rem 0 .6rem 0">Created by Oliver Duthie · ParkFit · '
+    'Statcast data 2021–present</div>', unsafe_allow_html=True)
