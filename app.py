@@ -1136,7 +1136,7 @@ same contact everywhere else? No wall-geometry simulation, no wind models we don
 enough data for every ball to do that honestly, and a model that pretends to is just wrong with
 extra steps. Historical outcomes are the engine.</p>
 <h3>Only visiting hitters count toward park effects</h3>
-<p>Home hitters are a trap. Teams build rosters and coach swings to exploit their own park
+<p>Home hitters are a trap. Teams build rosters and coach swings to exploit their own park.
 Yankee Stadium's numbers are full of lefties acquired specifically to pull balls at that short
 porch. Include them and you're measuring roster construction, not the park. So park effects here
 come from visiting hitters only: a rotating, roughly league-average sample that has no idea which
