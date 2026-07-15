@@ -1,7 +1,7 @@
 """ParkFit — player-specific park fit from empirical contact-shape outcomes.
 
 Run:  streamlit run app.py
-Requires scripts 01-03 (data/output/*.parquet). Optional: park_dimensions_clean.csv
+Requires scripts 00-03 to refresh data, then data/output/*.parquet. Optional: park_dimensions_clean.csv
 in this folder or the parent folder enables the field-outline cards.
 """
 
@@ -245,6 +245,27 @@ else:
     for c in ["k_pct", "bb_pct", "hr_pct", "home_park", "pa"]:
         players[c] = pd.NA
 
+# Data freshness is detected from player_extras.parquet. After scripts 00-03
+# are rerun with 2026 Statcast data, the site automatically displays that it
+# is updated through the 2026 season to date. Until then, it truthfully shows
+# the latest season actually present in the deployed model outputs.
+_year_values = pd.to_numeric(
+    extras["last_year"] if (not extras.empty and "last_year" in extras.columns)
+    else pd.Series(dtype="float64"),
+    errors="coerce",
+).dropna()
+DATA_MAX_YEAR = int(_year_values.max()) if not _year_values.empty else 2025
+DATA_RANGE_LABEL = (
+    f"2021-{DATA_MAX_YEAR} season to date"
+    if DATA_MAX_YEAR >= 2026
+    else f"2021-{DATA_MAX_YEAR}"
+)
+DATA_FRESHNESS_LABEL = (
+    f"Updated through the {DATA_MAX_YEAR} season to date"
+    if DATA_MAX_YEAR >= 2026
+    else f"Model data through {DATA_MAX_YEAR}"
+)
+
 # Home rank + best landing spot (Coors excluded), measured in shape fit.
 home_rows = []
 for _, p in players.dropna(subset=["home_park"]).iterrows():
@@ -386,15 +407,17 @@ def rank_chart(df, h):
 
 
 # ---------------------------------------------------------------------------
-st.markdown("""
+st.markdown(f"""
 <div class="hero">
  <h1>Park Fit Analyzer</h1>
- <p>Career batted-ball profiles (2021–present) for every active MLB hitter, scored across the 30
- parks in use for 2026. Every ball is bucketed by handedness, batter-perspective spray, exit
- velocity, and launch angle, then matched against how each park has historically rewarded that
- exact contact — fit on visiting hitters only, with hierarchical shrinkage, validated by
- split-half stability. Contact quality only; strikeout environments are shown for context.</p>
- <div><span class="pill">Career profiles</span><span class="pill">Empirical contact buckets</span>
+ <p>Career batted-ball profiles ({html.escape(DATA_RANGE_LABEL)}) for every active MLB hitter,
+ scored across the 30 parks in use for 2026. Every ball is bucketed by handedness,
+ batter-perspective spray, exit velocity, and launch angle, then matched against how each park
+ has historically rewarded that exact contact — fit on visiting hitters only, with hierarchical
+ shrinkage, validated by split-half stability. Contact quality only; strikeout environments are
+ shown for context.</p>
+ <div><span class="pill">{html.escape(DATA_FRESHNESS_LABEL)}</span>
+ <span class="pill">Career profiles</span><span class="pill">Empirical contact buckets</span>
  <span class="pill">Split-half validated</span><span class="pill">Trade fit</span>
  <span class="pill">2026-27 FA board</span><span class="pill">Explains why</span></div>
 </div>
@@ -637,43 +660,51 @@ if page == "League Insights":
     # ---- 2026-27 Free Agency board -----------------------------------
     fa_names = []
 
-if FA_FILE.exists():
-    fa_source = pd.read_csv(FA_FILE)
+    if FA_FILE.exists():
+        fa_source = pd.read_csv(FA_FILE)
 
-    if "name" not in fa_source.columns:
-        st.error("free_agents_2026.csv must contain a column called 'name'.")
+        if "name" not in fa_source.columns:
+            st.error("free_agents_2026.csv must contain a column called 'name'.")
+        else:
+            fa_names = (
+                fa_source["name"]
+                .dropna()
+                .astype(str)
+                .str.strip()
+                .tolist()
+            )
     else:
-        fa_names = (
-            fa_source["name"]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .tolist()
-        )
+        st.error(f"Could not find: {FA_FILE}")
 
-    # Temporary diagnostic so you can confirm the correct file is loading
-    st.caption(f"Free-agent file loaded from: {FA_FILE}")
-else:
-    st.error(f"Could not find: {FA_FILE}")
     st.markdown("### 2026-27 Free Agency board — where should the market's bats land?")
+
     if not fa_names:
-        st.info("Add free_agents_2026.csv (one hitter name per line) next to app.py "
+        st.info("Add free_agents_2026.csv with a 'name' column next to app.py "
                 "to power this board.")
     else:
         name_map = {norm_name(n): n for n in players["batter_name"]}
         fa_rows = []
+
         for fa in fa_names:
             match = name_map.get(norm_name(fa))
             if not match:
                 continue
+
             p = players[players["batter_name"] == match].iloc[0]
-            s = (scores[(scores["batter"] == p["batter"])
-                        & (scores["park"] != "Coors Field")]
-                 .sort_values("fit_vs_avg", ascending=False))
+            s = (
+                scores[
+                    (scores["batter"] == p["batter"])
+                    & (scores["park"] != "Coors Field")
+                ]
+                .sort_values("fit_vs_avg", ascending=False)
+            )
+
             if s.empty:
                 continue
+
             fa_rows.append({
-                "Hitter": match, "Bats": p["stand_bucket"],
+                "Hitter": match,
+                "Bats": p["stand_bucket"],
                 "Archetype": p.get("archetype", "—"),
                 "Spread": p["spread"],
                 "Best Fit": s.iloc[0]["park"],
@@ -681,26 +712,45 @@ else:
                 "2nd": s.iloc[1]["park"] if len(s) > 1 else "—",
                 "3rd": s.iloc[2]["park"] if len(s) > 2 else "—",
             })
+
         if fa_rows:
-            fa_df = pd.DataFrame(fa_rows).sort_values("Shape Edge", ascending=False)
+            fa_df = (
+                pd.DataFrame(fa_rows)
+                .sort_values("Shape Edge", ascending=False)
+            )
             st.markdown(
                 '<div class="insight">Upcoming 2026-27 free agent hitters, ranked by how '
                 'much their <b>best realistic landing spot</b> (Coors excluded) rewards their '
                 'contact shape. High-spread names are the ones where the signing park genuinely '
                 'changes the player. Edit <b>free_agents_2026.csv</b> to update the class.</div>',
-                unsafe_allow_html=True)
-            ev = st.dataframe(fa_df, hide_index=True, use_container_width=True,
-                on_select="rerun", selection_mode="single-row",
+                unsafe_allow_html=True,
+            )
+            ev = st.dataframe(
+                fa_df,
+                hide_index=True,
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="single-row",
                 key=f"tbl_fa_{st.session_state.jump_n}",
                 column_config={
                     "Spread": st.column_config.NumberColumn(format="%.3f"),
-                    "Shape Edge": st.column_config.NumberColumn(format="%+.4f")})
+                    "Shape Edge": st.column_config.NumberColumn(format="%+.4f"),
+                },
+            )
             row_jump(ev, fa_df, "Hitter", "sel_player", "Player Park Fit")
             st.caption("Click any hitter to open his Park Fit page.")
-        missing_fa = [fa for fa in fa_names if norm_name(fa) not in name_map]
+        else:
+            st.warning("The CSV loaded, but none of its names matched eligible hitters.")
+
+        missing_fa = [
+            fa for fa in fa_names
+            if norm_name(fa) not in name_map
+        ]
         if missing_fa:
-            st.caption("Not matched (name spelling, or below the batted-ball minimum): "
-                       + ", ".join(missing_fa))
+            st.caption(
+                "Not matched (name spelling, or below the batted-ball minimum): "
+                + ", ".join(missing_fa)
+            )
 
     # ---- The Park Lens: who gains the most at each park? --------------
     st.markdown("### The Park Lens — who gains the most at each park?")
@@ -1078,8 +1128,8 @@ hitter is average. Isaac Paredes and Vladimir Guerrero Jr. are both right-handed
 they need completely different ballparks, because one lives on pulled fly balls and the other
 scorches line drives everywhere. A model that can't tell them apart isn't measuring fit.</p>
 <h3>Start with the contact itself</h3>
-<p>The engine is simple to state: every batted ball since 2021 more than 619,000 of them gets
-sorted into a bucket by who hit it (lefty or righty), where it went off the bat (pull side through
+<p>The engine is simple to state: every batted ball from 2021 through the latest season included
+in the deployed data gets sorted into a bucket by who hit it (lefty or righty), where it went off the bat (pull side through
 opposite field, always from the hitter's perspective), how hard it was hit, and at what angle.
 Then, for every park, we ask history: how did this exact type of contact do here, compared to the
 same contact everywhere else? No wall-geometry simulation, no wind models we don't have reliable
@@ -1129,6 +1179,6 @@ shaped by the park he calls home, which no model of this kind can fully remove. 
 """, unsafe_allow_html=True)
 
 st.markdown(
-    '<div style="text-align:center;color:#94a3b8;font-weight:700;font-size:.85rem;'
-    'padding:1.6rem 0 .6rem 0">Created by Oliver Duthie · ParkFit · '
-    'Statcast data 2021–present</div>', unsafe_allow_html=True)
+    f'<div style="text-align:center;color:#94a3b8;font-weight:700;font-size:.85rem;'
+    f'padding:1.6rem 0 .6rem 0">Created by Oliver Duthie · ParkFit · '
+    f'Statcast data {html.escape(DATA_RANGE_LABEL)}</div>', unsafe_allow_html=True)
