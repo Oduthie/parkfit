@@ -1,28 +1,21 @@
 """ParkFit — player-specific park fit from empirical contact-shape outcomes.
-
 Run:  streamlit run app.py
 Requires scripts 00-03 to refresh data, then data/output/*.parquet. Optional: park_dimensions_clean.csv
 in this folder or the parent folder enables the field-outline cards.
 """
-
 import html
 import unicodedata
 from pathlib import Path
-
 import altair as alt
 import pandas as pd
 import streamlit as st
-
 st.set_page_config(page_title="Park Fit Analyzer", page_icon="⚾", layout="wide")
-
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "data" / "output"
-
 DIMS_CANDIDATES = [ROOT / "park_dimensions_clean.csv",
                    ROOT.parent / "park_dimensions_clean.csv"]
 DIM_ALIASES = {"Minute Maid Park": "Daikin Park",
                "Oakland Coliseum": "Oakland Coliseum"}
-
 # The 30 parks in use for the 2026 season. Older eras / temporary homes are
 # still used to FIT the model, but only these are shown and ranked. Edit if
 # anything changes (e.g. Rays venue).
@@ -36,7 +29,6 @@ CURRENT_PARKS_2026 = {
     "T-Mobile Park", "Oracle Park", "Busch Stadium", "Tropicana Field",
     "Globe Life Field", "Rogers Centre", "Nationals Park",
 }
-
 # Detected home parks from 2025 data may be retired era labels; map them to
 # the park that team plays in for 2026.
 HOME_REMAP = {
@@ -45,10 +37,7 @@ HOME_REMAP = {
     "Camden Yards (pre-2022 LF)": "Camden Yards (2025+ LF)",
     "Oakland Coliseum": "Sutter Health Park",
 }
-
 FA_FILE = ROOT / "free_agents_2026.csv"
-
-
 def norm_name(s):
     s = (unicodedata.normalize("NFKD", str(s))
          .encode("ascii", "ignore").decode().lower().replace(".", "").strip())
@@ -57,7 +46,6 @@ def norm_name(s):
         if s.endswith(suf):
             s = s[: -len(suf)]
     return s.strip()
-
 TEAM_META = {
  "American Family Field":("Brewers",158,"#12284B","#FFC52F"),
  "Angel Stadium":("Angels",108,"#BA0021","#003263"),
@@ -94,7 +82,6 @@ TEAM_META = {
  "Wrigley Field":("Cubs",112,"#0E3386","#CC3433"),
  "Yankee Stadium":("Yankees",147,"#0C2340","#C4CED4"),
 }
-
 st.markdown("""
 <style>
 .stApp { background: linear-gradient(135deg,#f8fafc 0%,#e8eef6 100%); }
@@ -167,8 +154,6 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
-
-
 # ---------------------------------------------------------------------------
 @st.cache_data
 def _load_all(stamp):
@@ -186,8 +171,6 @@ def _load_all(stamp):
             dims = dm.set_index("park_name")[["lf_line", "cf", "rf_line"]].to_dict("index")
             break
     return scores, profiles, contributions, extras, park_k, dims
-
-
 def load_all():
     needed = ["park_scores.parquet", "player_profiles.parquet",
               "bucket_contributions.parquet"]
@@ -200,32 +183,25 @@ def load_all():
              + tuple((OUT / n).stat().st_mtime if (OUT / n).exists() else 0.0
                      for n in opt))
     return _load_all(stamp)
-
-
 scores, profiles, contributions, extras, park_k_df, dims_raw = load_all()
-
 # ---- 2026 view: only parks in use this season, only recent hitters --------
 scores = scores[scores["park"].isin(CURRENT_PARKS_2026)].copy()
 if not extras.empty and "last_year" in extras.columns:
     active_ids = set(extras.loc[extras["last_year"] >= 2025, "batter"])
     scores = scores[scores["batter"].isin(active_ids)]
 contributions = contributions[contributions["park"].isin(CURRENT_PARKS_2026)]
-
 # Re-rank and re-spread within the 2026 park set.
 scores["park_rank"] = (scores.groupby("batter")["park_fit_delta"]
                        .rank(ascending=False, method="min").astype(int))
 _dep = scores.groupby("batter")["park_fit_delta"].agg(lambda s: s.max() - s.min())
 scores["park_dependency_score"] = scores["batter"].map(_dep)
-
 # Fit vs Avg: this park's delta for the player, minus the average delta of
 # same-handed scored hitters in that park — the pure player-park interaction.
 hand_avg = (scores.groupby(["park", "stand_bucket"], observed=True)["park_fit_delta"]
             .transform("mean"))
 scores = scores.assign(fit_vs_avg=(scores["park_fit_delta"] - hand_avg).round(4))
-
 park_k_map = (dict(zip(park_k_df["park"], park_k_df["park_k_pct"]))
               if not park_k_df.empty else {})
-
 players = (
     scores.groupby(["batter", "batter_name", "stand_bucket"], observed=True)
     .agg(spread=("park_dependency_score", "first"),
@@ -244,7 +220,6 @@ if not extras.empty:
 else:
     for c in ["k_pct", "bb_pct", "hr_pct", "home_park", "pa"]:
         players[c] = pd.NA
-
 # Data freshness is detected from player_extras.parquet. After scripts 00-03
 # are rerun with 2026 Statcast data, the site automatically displays that it
 # is updated through the 2026 season to date. Until then, it truthfully shows
@@ -265,7 +240,6 @@ DATA_FRESHNESS_LABEL = (
     if DATA_MAX_YEAR >= 2026
     else f"Model data through {DATA_MAX_YEAR}"
 )
-
 # Home rank + best landing spot (Coors excluded), measured in shape fit.
 home_rows = []
 for _, p in players.dropna(subset=["home_park"]).iterrows():
@@ -292,36 +266,22 @@ if not home_df.empty:
 else:
     for c in ["home_rank", "home_woba", "alt_park", "upgrade"]:
         players[c] = pd.NA
-
-
 def base_park(park):
     return str(park).split(" (")[0].strip()
-
-
 def team_meta(park):
     return TEAM_META.get(park) or TEAM_META.get(base_park(park)) \
         or ("", 0, "#2563eb", "#94a3b8")
-
-
 def park_dims(park):
     bp = base_park(park)
     return dims_raw.get(park) or dims_raw.get(bp) or dims_raw.get(DIM_ALIASES.get(bp, ""))
-
-
 def headshot(bid):
     return ("https://img.mlbstatic.com/mlb-photos/image/upload/"
             "w_300,d_people:generic:headshot:silo:current.png,q_auto:best/"
             f"v1/people/{int(bid)}/headshot/67/current")
-
-
 def logo(tid):
     return f"https://www.mlbstatic.com/team-logos/{int(tid)}.svg"
-
-
 def fmt(v, spec, dash="—"):
     return spec.format(v) if pd.notna(v) else dash
-
-
 def player_card(name, info, badges=""):
     bits = [str(info["stand_bucket"]), f'{int(info["n_balls"]):,} career batted balls']
     if pd.notna(info.get("k_pct")):
@@ -337,14 +297,10 @@ def player_card(name, info, badges=""):
             f'<div><div class="pname">{html.escape(str(name))}</div>'
             f'<div class="psub">{html.escape(" · ".join(bits))}</div>'
             f'{badges}</div></div></div>')
-
-
 def scard(label, value, small=""):
     s = f'<div class="ssmall">{html.escape(str(small))}</div>' if small else ""
     return (f'<div class="scard"><div class="slabel">{html.escape(str(label))}</div>'
             f'<div class="svalue">{html.escape(str(value))}</div>{s}</div>')
-
-
 def field_svg(lf, cf, rf, primary, secondary):
     def y(d):
         return 57 - ((d - 300) / (430 - 300)) * 27
@@ -356,8 +312,6 @@ def field_svg(lf, cf, rf, primary, secondary):
             f'fill="none" stroke="{secondary}" stroke-width="3.5" stroke-linecap="round"/>'
             f'<path d="M130 122 L30 55 M130 122 L230 55" stroke="#d97706" stroke-width="2" opacity=".6"/>'
             f'<path d="M130 120 L102 94 L130 70 L158 94 Z" fill="#fef3c7" stroke="#f97316"/></svg>')
-
-
 def park_card(park, rank, woba, driver, kpct):
     meta = team_meta(park)
     d = park_dims(park)
@@ -373,9 +327,7 @@ def park_card(park, rank, woba, driver, kpct):
     kbit = f" · park K% {kpct:.1f}" if pd.notna(kpct) else ""
     return (f'<div class="dcard"><div class="dtop"><span class="drank">#{int(rank)}</span>{lg}</div>'
             f'<div class="dtitle">{html.escape(park)}</div>{svg}{pills}'
-            f'<div class="dnote">{woba:.3f} proj wOBA{kbit} · {html.escape(driver)}</div></div>')
-
-
+            f'<div class="dnote">{woba:.3f} proj wOBAcon{kbit} · {html.escape(driver)}</div></div>')
 def build_drivers(sub):
     s = sub.copy()
     air = s[s["la_bucket"] != "GB"]
@@ -388,13 +340,11 @@ def build_drivers(sub):
         arrow = "▲" if r["bucket_contribution"] > 0 else "▼"
         out[r["park"]] = f'{arrow} {r["spray_bucket"]} {r["la_bucket"]} {r["ev_bucket"]}'
     return out
-
-
 def rank_chart(df, h):
     d = df.copy()
     d["display"] = d["park_rank"].astype(str) + ". " + d["park"]
     return (alt.Chart(d).mark_bar(cornerRadiusTopRight=7, cornerRadiusBottomRight=7)
-        .encode(x=alt.X("projected_contact_woba:Q", title="Projected wOBA",
+        .encode(x=alt.X("projected_contact_woba:Q", title="Projected wOBAcon",
                         scale=alt.Scale(zero=False)),
                 y=alt.Y("display:N", sort=d["display"].tolist(), title=None),
                 color=alt.Color("projected_contact_woba:Q",
@@ -404,8 +354,6 @@ def rank_chart(df, h):
                          alt.Tooltip("fit_vs_avg:Q", title="Fit vs avg", format="+.4f"),
                          alt.Tooltip("driver:N", title="Driver")])
         .properties(height=h))
-
-
 # ---------------------------------------------------------------------------
 st.markdown(f"""
 <div class="hero">
@@ -414,15 +362,15 @@ st.markdown(f"""
  scored across the 30 parks in use for 2026. Every ball is bucketed by handedness,
  batter-perspective spray, exit velocity, and launch angle, then matched against how each park
  has historically rewarded that exact contact — fit on visiting hitters only, with hierarchical
- shrinkage, validated by split-half stability. Contact quality only; strikeout environments are
- shown for context.</p>
+ shrinkage, validated by split-half stability. Projections are <b>wOBAcon</b> (wOBA on contact —
+ value per batted ball); strikeouts and walks are shown for context, never folded in, since park
+ dimensions only act on balls in play.</p>
  <div><span class="pill">{html.escape(DATA_FRESHNESS_LABEL)}</span>
  <span class="pill">Career profiles</span><span class="pill">Empirical contact buckets</span>
  <span class="pill">Split-half validated</span><span class="pill">Trade fit</span>
  <span class="pill">2026-27 FA board</span><span class="pill">Explains why</span></div>
 </div>
 """, unsafe_allow_html=True)
-
 PAGES = ["Player Park Fit", "Compare Hitters", "League Insights", "Game", "Methodology"]
 if "nav" not in st.session_state:
     st.session_state.nav = PAGES[0]
@@ -441,8 +389,6 @@ if _page != st.session_state.nav:
     st.session_state.nav = _page
     st.session_state.back_to = None
 page = st.session_state.nav
-
-
 def row_jump(event, df, field, state_key, target_page):
     """Click a table row -> jump to the relevant page with it preloaded."""
     try:
@@ -455,7 +401,6 @@ def row_jump(event, df, field, state_key, target_page):
         st.session_state.nav = target_page
         st.session_state.jump_n += 1
         st.rerun()
-
 # ================= PAGE 1 =================
 if page == "Player Park Fit":
     _plist = sorted(players["batter_name"].dropna().unique())
@@ -471,12 +416,10 @@ if page == "Player Park Fit":
         pr["driver"] = pr["park"].map(build_drivers(sub)).fillna("—")
         pr["park_k_pct"] = pr["park"].map(park_k_map)
         table_h = len(pr) * 35 + 40
-
         best, worst = pr.iloc[0], pr.iloc[-1]
         spread = info["spread"]
         pct = (players["spread"] < spread).mean() * 100
         has_home = pd.notna(info.get("home_park")) and pd.notna(info.get("home_rank"))
-
         badges = (f'<span class="badge b-blue">Best: {html.escape(best["park"])}</span>'
                   f'<span class="badge b-orange">Worst: {html.escape(worst["park"])}</span>')
         if has_home:
@@ -490,16 +433,15 @@ if page == "Player Park Fit":
         if info["tier"] == "provisional":
             badges += '<span class="badge b-orange">Provisional sample</span>'
         st.markdown(player_card(name, info, badges), unsafe_allow_html=True)
-
         bestfit = pr.loc[pr["fit_vs_avg"].idxmax()]
         st.markdown('<div class="sgrid">'
             + scard("Best Park (raw)", best["park"],
-                    f'{best["projected_contact_woba"]:.3f} proj wOBA — hitter parks '
+                    f'{best["projected_contact_woba"]:.3f} proj wOBAcon — hitter parks '
                     'top this for everyone')
             + scard("Best Shape Fit", bestfit["park"],
                     f'{bestfit["fit_vs_avg"]:+.4f} vs avg {info["stand_bucket"]} — '
                     'HIS edge, park quality removed')
-            + scard("Worst Park", worst["park"], f'{worst["projected_contact_woba"]:.3f} proj wOBA')
+            + scard("Worst Park", worst["park"], f'{worst["projected_contact_woba"]:.3f} proj wOBAcon')
             + scard("Park Spread", f"{spread:.3f}",
                     f'{pct:.0f}th pct — '
                     + ("park-proof" if pct < 30 else "park-sensitive" if pct > 70 else "typical"))
@@ -507,7 +449,6 @@ if page == "Player Park Fit":
                     f'{fmt(info.get("hr_pct"), "{:.1f}")} / {fmt(info.get("k_pct"), "{:.1f}")}',
                     "per BBE / per PA")
             + '</div>', unsafe_allow_html=True)
-
         home_line = ""
         if has_home:
             if info["upgrade"] >= 0.006:
@@ -527,7 +468,6 @@ if page == "Player Park Fit":
             f'<b>{html.escape(bestfit["park"])}</b> (fit {bestfit["fit_vs_avg"]:+.4f}).'
             f'{home_line}</div>',
             unsafe_allow_html=True)
-
         l, r = st.columns([1.15, 1])
         with l:
             st.markdown("### Full Ranking")
@@ -537,27 +477,27 @@ if page == "Player Park Fit":
             cols.append("driver")
             show = pr[cols].rename(
                 columns={"park_rank": "Rank", "park": "Park",
-                         "projected_contact_woba": "Proj wOBA", "fit_vs_avg": "Fit vs Avg",
+                         "projected_contact_woba": "Proj wOBAcon", "fit_vs_avg": "Fit vs Avg",
                          "park_k_pct": "Park K%", "driver": "Primary driver"})
             ev = st.dataframe(show, hide_index=True, use_container_width=True,
                 height=table_h, on_select="rerun", selection_mode="single-row",
                 key=f"tbl_rank_{st.session_state.jump_n}",
                 column_config={
-                    "Proj wOBA": st.column_config.NumberColumn(format="%.3f"),
+                    "Proj wOBAcon": st.column_config.NumberColumn(format="%.3f"),
                     "Fit vs Avg": st.column_config.NumberColumn(format="%+.4f"),
                     "Park K%": st.column_config.NumberColumn(format="%.1f")})
             row_jump(ev, show, "Park", "lens_park_sel", "League Insights")
-            st.caption("Click any park row to open it in the Park Lens.")
+            st.caption("wOBAcon = wOBA on contact — value per batted ball. Strikeouts and "
+                       "walks are excluded, since park dimensions only act on balls in play. "
+                       "Click any park row to open it in the Park Lens.")
         with r:
             st.markdown("### Projection Chart")
             st.altair_chart(rank_chart(pr, table_h), use_container_width=True)
-
         st.markdown("### Top 5 Fits")
         cards = "".join(park_card(x["park"], x["park_rank"], x["projected_contact_woba"],
                                   x["driver"], x["park_k_pct"])
                         for _, x in pr.head(5).iterrows())
         st.markdown(f'<div class="dgrid">{cards}</div>', unsafe_allow_html=True)
-
         st.markdown("### Why this park?")
         park_pick = st.selectbox("Park", list(pr["park"]))
         wsub = sub[sub["park"] == park_pick].copy()
@@ -584,7 +524,6 @@ if page == "Player Park Fit":
                     "Park sample": st.column_config.NumberColumn(format="%.0f")})
             st.caption("Contribution = how often he creates that contact × how much this park "
                        "rewards it vs league average.")
-
 # ================= PAGE 2 =================
 if page == "Compare Hitters":
     names = sorted(players["batter_name"].dropna().unique())
@@ -605,11 +544,11 @@ if page == "Compare Hitters":
                      f'<span class="badge b-purple">Spread {inf["spread"]:.3f}</span>')
                 st.markdown(player_card(nm, inf, b), unsafe_allow_html=True)
         a = scores[scores["batter_name"] == pa][["park", "park_rank", "projected_contact_woba"]] \
-            .rename(columns={"park_rank": f"{pa} Rank", "projected_contact_woba": f"{pa} wOBA"})
+            .rename(columns={"park_rank": f"{pa} Rank", "projected_contact_woba": f"{pa} wOBAcon"})
         b = scores[scores["batter_name"] == pb][["park", "park_rank", "projected_contact_woba"]] \
-            .rename(columns={"park_rank": f"{pb} Rank", "projected_contact_woba": f"{pb} wOBA"})
+            .rename(columns={"park_rank": f"{pb} Rank", "projected_contact_woba": f"{pb} wOBAcon"})
         comp = a.merge(b, on="park")
-        comp["Difference"] = comp[f"{pa} wOBA"] - comp[f"{pb} wOBA"]
+        comp["Difference"] = comp[f"{pa} wOBAcon"] - comp[f"{pb} wOBAcon"]
         # Relative fit strips the level gap between the two hitters, leaving
         # which parks favor A's SHAPE vs B's shape.
         comp["Relative Fit"] = (comp["Difference"] - comp["Difference"].mean()).round(4)
@@ -625,12 +564,12 @@ if page == "Compare Hitters":
             unsafe_allow_html=True)
         l, r = st.columns([1.05, 1])
         with l:
-            comp_show = comp[["park", f"{pa} wOBA", f"{pb} wOBA", "Relative Fit"]]
+            comp_show = comp[["park", f"{pa} wOBAcon", f"{pb} wOBAcon", "Relative Fit"]]
             st.dataframe(comp_show.rename(columns={"park": "Park"}), hide_index=True,
                 use_container_width=True, height=table_h,
                 column_config={
-                    f"{pa} wOBA": st.column_config.NumberColumn(format="%.3f"),
-                    f"{pb} wOBA": st.column_config.NumberColumn(format="%.3f"),
+                    f"{pa} wOBAcon": st.column_config.NumberColumn(format="%.3f"),
+                    f"{pb} wOBAcon": st.column_config.NumberColumn(format="%.3f"),
                     "Difference": st.column_config.NumberColumn(format="%+.3f"),
                     "Relative Fit": st.column_config.NumberColumn(format="%+.3f")})
         with r:
@@ -645,7 +584,6 @@ if page == "Compare Hitters":
             st.altair_chart(ch, use_container_width=True)
     elif pa == pb:
         st.info("Choose two different hitters.")
-
 # ================= PAGE 3 =================
 if page == "League Insights":
     st.markdown(
@@ -656,13 +594,10 @@ if page == "League Insights":
         'number these boards run on. <b>Spread</b> — the gap between his best and worst park; '
         'high-spread hitters are the ones where the address genuinely changes the player.</div>',
         unsafe_allow_html=True)
-
     # ---- 2026-27 Free Agency board -----------------------------------
     fa_names = []
-
     if FA_FILE.exists():
         fa_source = pd.read_csv(FA_FILE)
-
         if "name" not in fa_source.columns:
             st.error("free_agents_2026.csv must contain a column called 'name'.")
         else:
@@ -675,21 +610,17 @@ if page == "League Insights":
             )
     else:
         st.error(f"Could not find: {FA_FILE}")
-
     st.markdown("### 2026-27 Free Agency board — where should the market's bats land?")
-
     if not fa_names:
         st.info("Add free_agents_2026.csv with a 'name' column next to app.py "
                 "to power this board.")
     else:
         name_map = {norm_name(n): n for n in players["batter_name"]}
         fa_rows = []
-
         for fa in fa_names:
             match = name_map.get(norm_name(fa))
             if not match:
                 continue
-
             p = players[players["batter_name"] == match].iloc[0]
             s = (
                 scores[
@@ -698,10 +629,8 @@ if page == "League Insights":
                 ]
                 .sort_values("fit_vs_avg", ascending=False)
             )
-
             if s.empty:
                 continue
-
             fa_rows.append({
                 "Hitter": match,
                 "Bats": p["stand_bucket"],
@@ -712,7 +641,6 @@ if page == "League Insights":
                 "2nd": s.iloc[1]["park"] if len(s) > 1 else "—",
                 "3rd": s.iloc[2]["park"] if len(s) > 2 else "—",
             })
-
         if fa_rows:
             fa_df = (
                 pd.DataFrame(fa_rows)
@@ -741,7 +669,6 @@ if page == "League Insights":
             st.caption("Click any hitter to open his Park Fit page.")
         else:
             st.warning("The CSV loaded, but none of its names matched eligible hitters.")
-
         missing_fa = [
             fa for fa in fa_names
             if norm_name(fa) not in name_map
@@ -751,7 +678,6 @@ if page == "League Insights":
                 "Not matched (name spelling, or below the batted-ball minimum): "
                 + ", ".join(missing_fa)
             )
-
     # ---- The Park Lens: who gains the most at each park? --------------
     st.markdown("### The Park Lens — who gains the most at each park?")
     st.markdown(
@@ -798,10 +724,8 @@ if page == "League Insights":
                           column_config=lens_cfg)
         row_jump(ev, _t, "Hitter", "sel_player", "Player Park Fit")
     st.caption("Click any hitter to open his Park Fit page.")
-
     hb = players.dropna(subset=["upgrade", "home_rank"]).copy()
     n_excl = players["home_rank"].isna().sum()
-
     st.markdown("### The trade board — who's in the wrong park?")
     st.markdown(
         '<div class="insight">Each hitter\'s current home ranked against all parks <b>for his '
@@ -840,7 +764,6 @@ if page == "League Insights":
     if n_excl:
         st.caption(f"{n_excl} hitters excluded from the board (no home park detected — "
                    f"typically too few recent home batted balls).")
-
     st.markdown("### The league at a glance")
     sc_df = players.dropna(subset=["hr_pct", "spread"])
     sc = (alt.Chart(sc_df)
@@ -855,13 +778,10 @@ if page == "League Insights":
     st.altair_chart(sc, use_container_width=True)
     st.caption("Bottom-right = park-proof power. High-K hitters (bright) also face a second "
                "channel of park variation: strikeout environments (shown, not modeled).")
-
 # ================= PAGE 4: GAME =================
 if page == "Game":
     import random
-
     st.markdown("### Higher or Lower: Park Edition")
-
     @st.cache_data
     def _load_game_deltas(stamp):
         d2 = pd.read_parquet(ROOT / "data" / "model" / "deltas_coarse.parquet")
@@ -870,14 +790,12 @@ if page == "Game":
         except Exception:
             ph2 = pd.DataFrame()
         return d2, ph2
-
     _mp = ROOT / "data" / "model" / "deltas_coarse.parquet"
     if not _mp.exists():
         st.info("The game needs data/model/deltas_coarse.parquet (created by "
                 "scripts/02_fit_bucket_model.py).")
     else:
         d2, ph2 = _load_game_deltas((_mp.stat().st_mtime,))
-
         game_pool_df = (players[players["tier"] == "full"]
                         .sort_values("n_balls", ascending=False).head(250))
         pool_by_hand = {
@@ -886,7 +804,6 @@ if page == "Game":
         }
         game_pool = game_pool_df["batter"].tolist()
         delta_lookup = scores.set_index(["batter", "park"])["park_fit_delta"]
-
         MODES = {
             "Casual": dict(min_gap=0.004, max_gap=99, same_hand=False,
                            show_stats=True, show_blurb=True),
@@ -895,7 +812,6 @@ if page == "Game":
             "Front Office": dict(min_gap=0.0012, max_gap=0.006, same_hand=True,
                                  show_stats=False, show_blurb=False),
         }
-
         def park_hero(park):
             meta = team_meta(park)
             d = park_dims(park)
@@ -921,7 +837,6 @@ if page == "Game":
                     f'gap:.8rem">{lg}<div style="font-size:1.6rem;font-weight:900;'
                     f'letter-spacing:-.02em">{html.escape(park)}</div></div>'
                     f'<div style="max-width:340px;margin:0 auto">{svg}</div>{pills}</div>')
-
         def _phrase(r):
             spray = {"ExtremePull": "extreme pull-side", "Pull": "pull-side",
                      "Center": "center-field", "Oppo": "opposite-field",
@@ -929,7 +844,6 @@ if page == "Game":
             la = {"Low": "low liners", "Line": "line drives", "IdealAir": "ideal-air flies",
                   "HighAir": "high flies"}.get(r["la_bucket"], r["la_bucket"])
             return f'{r["stand_bucket"]} {spray} {la}'
-
         def park_blurb(park, with_numbers=True):
             sub = d2[(d2["park"] == park)
                      & (~d2["la_bucket"].isin(["GB", "Popup"]))]
@@ -952,7 +866,6 @@ if page == "Game":
                     '<br><span style="color:#64748b;font-size:.85rem">From historical '
                     'outcomes vs league average for each contact type, visiting hitters '
                     'only.</span></div>')
-
         def new_round(park_choice, mode):
             cfg = MODES[mode]
             park = (random.choice(sorted(CURRENT_PARKS_2026))
@@ -980,13 +893,11 @@ if page == "Game":
             a, b, da, db = pair
             return {"park": park, "a": a, "b": b, "da": da, "db": db,
                     "revealed": False, "picked": None, "mode": mode}
-
         if "game_streak" not in st.session_state:
             st.session_state.game_streak = 0
             st.session_state.game_best = 0
             st.session_state.game_round_id = 0
             st.session_state.game = None
-
         cc1, cc2 = st.columns([1.4, 1])
         with cc1:
             park_options = ["🎲 Random park"] + sorted(CURRENT_PARKS_2026)
@@ -996,7 +907,6 @@ if page == "Game":
                 help="Casual: full scouting info, clear gaps. Scout: same-handed "
                      "hitters, no stat lines. Front Office: park intel hidden until "
                      "after your call, razor-thin gaps.")
-
         g = st.session_state.game
         needs_new = (
             g is None
@@ -1008,7 +918,6 @@ if page == "Game":
             st.session_state.game = new_round(park_choice, mode)
             st.session_state.game_round_id += 1
             g = st.session_state.game
-
         if g is None:
             st.warning("Couldn't build a matchup for that park/difficulty — try another.")
         else:
@@ -1016,7 +925,6 @@ if page == "Game":
             s1, s2 = st.columns(2)
             s1.metric("Streak 🔥", st.session_state.game_streak)
             s2.metric("Best", st.session_state.game_best)
-
             st.markdown(park_hero(g["park"]), unsafe_allow_html=True)
             if cfg["show_blurb"] or g["revealed"]:
                 st.markdown(park_blurb(g["park"], with_numbers=g["revealed"]),
@@ -1025,10 +933,8 @@ if page == "Game":
                 st.markdown('<div class="insight">🕶️ <b>Front Office mode:</b> no park '
                             'intel until you commit. You should know your parks.</div>',
                             unsafe_allow_html=True)
-
             pa_row = players[players["batter"] == g["a"]].iloc[0]
             pb_row = players[players["batter"] == g["b"]].iloc[0]
-
             def game_card(row, show_stats):
                 if show_stats:
                     sub_line = (f'{row["stand_bucket"]} · '
@@ -1044,7 +950,6 @@ if page == "Game":
                         f'<div class="pname" style="font-size:1.3rem;margin-top:.5rem">'
                         f'{html.escape(str(row["batter_name"]))}</div>'
                         f'<div class="psub">{sub_line}</div></div>')
-
             st.markdown(f"#### Whose contact shape fits **{g['park']}** better?")
             colA, colB = st.columns(2)
             with colA:
@@ -1077,7 +982,6 @@ if page == "Game":
                         st.session_state.game_best = max(
                             st.session_state.game_best, st.session_state.game_streak)
                         st.rerun()
-
             if g["revealed"]:
                 winner_is_a = g["da"] > g["db"]
                 picked_winner = (g["picked"] == "a") == winner_is_a
@@ -1088,7 +992,6 @@ if page == "Game":
                 else:
                     st.error(f"❌ Not this time — **{win_row['batter_name']}** fits "
                              f"{g['park']} better.")
-
                 def why(batter_id):
                     subc = contributions[(contributions["batter"] == batter_id)
                                          & (contributions["park"] == g["park"])].copy()
@@ -1101,7 +1004,6 @@ if page == "Game":
                     arrow = "▲" if r["bucket_contribution"] > 0 else "▼"
                     return (f'{arrow} {r["spray_bucket"]} {r["la_bucket"]} '
                             f'{r["ev_bucket"]} mph ({r["bucket_contribution"]:+.4f})')
-
                 r1, r2 = st.columns(2)
                 r1.metric(pa_row["batter_name"], f'{g["da"]:+.4f}',
                           help="Park Fit Δ at this park")
@@ -1109,14 +1011,12 @@ if page == "Game":
                 r2.metric(pb_row["batter_name"], f'{g["db"]:+.4f}',
                           help="Park Fit Δ at this park")
                 r2.caption(why(g["b"]))
-
                 if st.button("Next matchup ⚾", type="primary",
                              key=f"next_{st.session_state.game_round_id}",
                              use_container_width=True):
                     st.session_state.game = new_round(park_choice, mode)
                     st.session_state.game_round_id += 1
                     st.rerun()
-
 # ================= PAGE 5 =================
 if page == "Methodology":
     st.markdown("""
@@ -1177,7 +1077,6 @@ shaped by the park he calls home, which no model of this kind can fully remove. 
 <i>fit</i>, not <i>talent</i> where a swing plays best, not how good it is.</p>
 </div>
 """, unsafe_allow_html=True)
-
 st.markdown(
     f'<div style="text-align:center;color:#94a3b8;font-weight:700;font-size:.85rem;'
     f'padding:1.6rem 0 .6rem 0">Created by Oliver Duthie · ParkFit · '
